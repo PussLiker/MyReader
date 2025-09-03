@@ -1,20 +1,43 @@
-// lib/domain/entities/book_entity.dart
 class BookEntity {
   final int id;
   final String title;
   final String author;
-  final String category;
-  final String format;
-  final double progress;
   final String path;
+  final String format;
+  final String? coverPath;
+  final int progress;
+  final String? category;
 
   BookEntity({
     required this.id,
     required this.title,
     required this.author,
-    required this.category,
-    required this.format,
-    required this.progress,
     required this.path,
+    required this.format,
+    this.coverPath,
+    this.progress = 0,
+    this.category,
   });
+
+  BookEntity copyWith({
+    int? id,
+    String? title,
+    String? author,
+    String? path,
+    String? format,
+    String? coverPath,
+    int? progress,
+    String? category,
+  }) {
+    return BookEntity(
+      id: id ?? this.id,
+      title: title ?? this.title,
+      author: author ?? this.author,
+      path: path ?? this.path,
+      format: format ?? this.format,
+      coverPath: coverPath ?? this.coverPath,
+      progress: progress ?? this.progress,
+      category: category ?? this.category,
+    );
+  }
 }

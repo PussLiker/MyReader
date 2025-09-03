@@ -1,0 +1,16 @@
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        classpath "com.android.tools.build:gradle:8.6.1"
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.25"
+    }
+}
+
+allprojects {
+    repositories {
+        // Не добавляй google() или mavenCentral() здесь, если используешь dependencyResolutionManagement в settings.gradle
+    }
+}

@@ -1,18 +1,14 @@
-// lib/infrastructure/epub/epub_parser.dart
-import 'package:epub_viewer/epub_viewer.dart';
+import 'dart:io';
+import 'package:xml/xml.dart';
 
 class EpubParser {
-  Future<Map<String, dynamic>> parseMetadata(String path) async {
-    // Заглушка: возвращаем тестовые метаданные
-    // Позже заменим на реальный парсинг с epub_viewer или epubx
-    try {
-      return {
-        'title': 'Тестовая книга',
-        'author': 'Неизвестен',
-        'category': 'Другое',
-      };
-    } catch (e) {
-      throw Exception('Не удалось разобрать EPUB: $e');
-    }
+  Future<String> parseFb2Content(String filePath) async {
+    final xmlString = await File(filePath).readAsString();
+    final document = XmlDocument.parse(xmlString);
+    final sections = document.findAllElements('section').toList();
+    final paragraphs = sections.isNotEmpty
+        ? sections.first.findAllElements('p').map((p) => p.text).join('\n\n')
+        : 'Контент не найден';
+    return paragraphs;
   }
 }
