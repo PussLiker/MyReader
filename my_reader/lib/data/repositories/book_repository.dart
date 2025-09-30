@@ -14,22 +14,17 @@ class BookRepository {
     return await databaseHelper.getBooks();
   }
 
-  Future<void> addBook(String filePath) async {
+  Future<int> addBook(String filePath, {String? categoryOverride}) async {
     final format = path.extension(filePath).toLowerCase().replaceFirst('.', '');
     String title = path.basenameWithoutExtension(filePath);
     String author = 'Unknown';
-    String? coverPath;
     String? category;
 
     if (format == 'epub') {
       try {
-        final epub = await EpubReader.readBook(File(filePath).readAsBytesSync());
+        final epub = await EpubReader.readBook(await File(filePath).readAsBytes());
         title = epub.Title ?? title;
         author = epub.Author ?? author;
-        if (epub.CoverImage != null) {
-          final coverFile = File('${filePath}_cover.jpg');
-          coverPath = coverFile.path;
-        }
         final metadata = epub.Schema?.Package?.Metadata;
         if (metadata != null && metadata.Subjects != null && metadata.Subjects!.isNotEmpty) {
           category = metadata.Subjects!.join(', ');
@@ -63,36 +58,62 @@ class BookRepository {
       throw Exception('Unsupported file format: $format');
     }
 
+    category = categoryOverride ?? category;
+    if (category != null && !await databaseHelper.categoryExists(category)) {
+      await databaseHelper.insertCategory(category);
+    }
+
     final book = BookEntity(
       id: 0,
       title: title,
       author: author,
       path: filePath,
       format: format.toUpperCase(),
-      coverPath: coverPath,
+      coverPath: null, // Обложки пока не поддерживаются
+      progress: 0,
       category: category,
     );
 
-    await databaseHelper.insertBook(book);
+    return await databaseHelper.insertBook(book);
+  }
+
+  Future<void> updateBook(BookEntity book) async {
+    await databaseHelper.updateBook(book);
+  }
+
+  Future<void> deleteBook(int bookId) async {
+    await databaseHelper.deleteBook(bookId);
+  }
+
+  Future<List<String>> getCategories() async {
+    return await databaseHelper.getCategories();
   }
 
   Future<void> updateProgress(int bookId, int progress) async {
     await databaseHelper.updateProgress(bookId, progress);
   }
 
-  Future<void> addBookmark(int bookId, int chapterIndex, String description) async {
-    await databaseHelper.addBookmark(bookId, chapterIndex, description);
+  Future<int> addBookmark(int bookId, int position, String note) async {
+    return await databaseHelper.addBookmark(bookId, position, note);
   }
 
   Future<List<Map<String, dynamic>>> getBookmarks(int bookId) async {
     return await databaseHelper.getBookmarks(bookId);
   }
 
-  Future<void> addQuote(int bookId, int chapterIndex, String quoteText) async {
-    await databaseHelper.addQuote(bookId, chapterIndex, quoteText);
+  Future<void> deleteBookmark(int bookmarkId) async {
+    await databaseHelper.deleteBookmark(bookmarkId);
+  }
+
+  Future<int> addQuote(int bookId, int position, String quoteText, String? comment) async {
+    return await databaseHelper.addQuote(bookId, position, quoteText, comment);
   }
 
   Future<List<Map<String, dynamic>>> getQuotes(int bookId) async {
     return await databaseHelper.getQuotes(bookId);
+  }
+
+  Future<void> deleteQuote(int quoteId) async {
+    await databaseHelper.deleteQuote(quoteId);
   }
 }

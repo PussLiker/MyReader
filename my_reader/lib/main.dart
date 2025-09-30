@@ -14,7 +14,19 @@ class MyReaderApp extends StatelessWidget {
     return MaterialApp(
       title: 'My Reader',
       theme: ThemeData(
-        primarySwatch: Colors.blue,
+        primaryColor: const Color(0xFFD7CCC8),
+        scaffoldBackgroundColor: const Color(0xFFF5F5DC),
+        textTheme: const TextTheme(
+          bodyMedium: TextStyle(color: Color(0xFF5D4037)),
+          titleLarge: TextStyle(color: Color(0xFF5D4037)),
+        ),
+        iconTheme: const IconThemeData(color: Color(0xFF8D6E63)),
+        elevatedButtonTheme: ElevatedButtonThemeData(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFF8D6E63),
+            foregroundColor: const Color(0xFFF5F5DC),
+          ),
+        ),
         useMaterial3: true,
       ),
       home: const LibraryScreen(),
