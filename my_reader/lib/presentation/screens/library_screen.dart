@@ -19,6 +19,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
   String _searchQuery = '';
   String? _selectedCategory;
   List<String> _categories = [];
+  List<BookEntity> _books = [];
 
   @override
   void initState() {
@@ -31,6 +32,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
     final categories = await repo.getCategories();
     setState(() {
       _categories = ['Все категории', ...categories];
+      _selectedCategory = _selectedCategory ?? 'Все категории';
     });
   }
 
@@ -40,12 +42,21 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
       MaterialPageRoute(builder: (context) => AddBookScreen(book: book)),
     );
     if (result == true) {
-      ref.refresh(getBooksProvider(_selectedCategory));
+      ref.invalidate(getBooksProvider(null)); // Принудительно обновляем все категории
+      ref.invalidate(getBooksProvider(_selectedCategory)); // Обновляем текущую категорию
+      await _loadCategories(); // Обновляем категории
+      // Даём время провайдеру обновиться
+      await Future.delayed(const Duration(milliseconds: 100));
+      final updatedBooks = await ref.read(getBooksProvider(_selectedCategory).future);
+      setState(() {
+        _books = updatedBooks;
+        print('Books after edit: ${_books.length}'); // Дебаг-лог
+      });
     }
   }
 
-  Future<void> _deleteBook(BookEntity book) async {
-    final confirm = await showDialog<bool>(
+  Future<bool?> _confirmDeleteBook(BookEntity book) async {
+    final result = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFFEDE7D9),
@@ -75,11 +86,21 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
         ],
       ),
     );
-    if (confirm == true) {
+    if (result == true) {
       final repo = ref.read(bookRepositoryProvider);
       await repo.deleteBook(book.id);
-      ref.refresh(getBooksProvider(_selectedCategory));
+      ref.invalidate(getBooksProvider(null)); // Принудительно обновляем все категории
+      ref.invalidate(getBooksProvider(_selectedCategory)); // Обновляем текущую категорию
+      await _loadCategories(); // Обновляем категории
+      // Даём время провайдеру обновиться
+      await Future.delayed(const Duration(milliseconds: 100));
+      final updatedBooks = await ref.read(getBooksProvider(_selectedCategory).future);
+      setState(() {
+        _books = updatedBooks;
+        print('Books after delete: ${_books.length}'); // Дебаг-лог
+      });
     }
+    return result;
   }
 
   @override
@@ -128,11 +149,35 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
                 Navigator.pop(context);
                 final result = await Navigator.push(
                   context,
-                  MaterialPageRoute(builder: (context) => const AddBookScreen()),
+                  PageRouteBuilder(
+                    pageBuilder: (context, animation, secondaryAnimation) => const AddBookScreen(),
+                    transitionsBuilder: (context, animation, secondaryAnimation, child) {
+                      const begin = Offset(0.0, 1.0);
+                      const end = Offset.zero;
+                      const curve = Curves.easeInOut;
+                      final tween = Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
+                      return SlideTransition(
+                        position: animation.drive(tween),
+                        child: FadeTransition(
+                          opacity: animation,
+                          child: child,
+                        ),
+                      );
+                    },
+                    transitionDuration: const Duration(milliseconds: 300),
+                  ),
                 );
                 if (result == true) {
-                  ref.refresh(getBooksProvider(_selectedCategory));
-                  _loadCategories();
+                  ref.invalidate(getBooksProvider(null)); // Принудительно обновляем все категории
+                  ref.invalidate(getBooksProvider(_selectedCategory)); // Обновляем текущую категорию
+                  await _loadCategories(); // Обновляем категории
+                  // Даём время провайдеру обновиться
+                  await Future.delayed(const Duration(milliseconds: 100));
+                  final updatedBooks = await ref.read(getBooksProvider(_selectedCategory).future);
+                  setState(() {
+                    _books = updatedBooks;
+                    print('Books after add: ${_books.length}'); // Дебаг-лог
+                  });
                 }
               },
             ),
@@ -146,7 +191,23 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
                 Navigator.pop(context);
                 Navigator.push(
                   context,
-                  MaterialPageRoute(builder: (context) => const BookmarksScreen()),
+                  PageRouteBuilder(
+                    pageBuilder: (context, animation, secondaryAnimation) => const BookmarksScreen(),
+                    transitionsBuilder: (context, animation, secondaryAnimation, child) {
+                      const begin = Offset(0.0, 1.0);
+                      const end = Offset.zero;
+                      const curve = Curves.easeInOut;
+                      final tween = Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
+                      return SlideTransition(
+                        position: animation.drive(tween),
+                        child: FadeTransition(
+                          opacity: animation,
+                          child: child,
+                        ),
+                      );
+                    },
+                    transitionDuration: const Duration(milliseconds: 300),
+                  ),
                 );
               },
             ),
@@ -160,7 +221,23 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
                 Navigator.pop(context);
                 Navigator.push(
                   context,
-                  MaterialPageRoute(builder: (context) => const QuotesScreen()),
+                  PageRouteBuilder(
+                    pageBuilder: (context, animation, secondaryAnimation) => const QuotesScreen(),
+                    transitionsBuilder: (context, animation, secondaryAnimation, child) {
+                      const begin = Offset(0.0, 1.0);
+                      const end = Offset.zero;
+                      const curve = Curves.easeInOut;
+                      final tween = Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
+                      return SlideTransition(
+                        position: animation.drive(tween),
+                        child: FadeTransition(
+                          opacity: animation,
+                          child: child,
+                        ),
+                      );
+                    },
+                    transitionDuration: const Duration(milliseconds: 300),
+                  ),
                 );
               },
             ),
@@ -215,6 +292,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
                     setState(() {
                       _selectedCategory = value == 'Все категории' ? null : value;
                     });
+                    ref.invalidate(getBooksProvider(_selectedCategory)); // Принудительное обновление
                   },
                 ),
               ],
@@ -223,11 +301,18 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
           Expanded(
             child: booksAsync.when(
               data: (books) {
-                final filteredBooks = books
-                    .where((book) =>
-                    book.title.toLowerCase().contains(_searchQuery.toLowerCase()))
-                    .toList();
-                if (filteredBooks.isEmpty) {
+                print('Books from provider: ${books.length}'); // Дебаг-лог
+                _books = books.where((book) {
+                  final matchesSearch =
+                  book.title.toLowerCase().contains(_searchQuery.toLowerCase());
+                  final matchesCategory = _selectedCategory == null ||
+                      _selectedCategory == 'Все категории' ||
+                      book.category == _selectedCategory;
+                  return matchesSearch && matchesCategory;
+                }).toList()
+                  ..sort((a, b) => b.id.compareTo(a.id)); // Сортировка по новизне
+                print('Filtered books: ${_books.length}'); // Дебаг-лог
+                if (_books.isEmpty) {
                   return const Center(
                     child: Text(
                       'Нет книг',
@@ -237,9 +322,9 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
                 }
                 return ListView.builder(
                   padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                  itemCount: filteredBooks.length,
+                  itemCount: _books.length,
                   itemBuilder: (context, index) {
-                    final book = filteredBooks[index];
+                    final book = _books[index];
                     return Dismissible(
                       key: Key(book.id.toString()),
                       direction: DismissDirection.endToStart,
@@ -249,8 +334,8 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
                         padding: const EdgeInsets.only(right: 20.0),
                         child: const Icon(Icons.delete, color: Colors.white),
                       ),
-                      onDismissed: (direction) {
-                        _deleteBook(book);
+                      confirmDismiss: (direction) async {
+                        return await _confirmDeleteBook(book);
                       },
                       child: Card(
                         color: const Color(0xFFBCAAA4),

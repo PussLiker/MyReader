@@ -6,7 +6,7 @@ plugins {
 }
 
 android {
-    namespace = "com.example.my_reader"
+    namespace "com.example.my_reader"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
