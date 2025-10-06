@@ -1,125 +1,406 @@
 import 'package:flutter/material.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:my_reader/data/db/database_helper.dart';
-import 'package:my_reader/presentation/providers/book_provider.dart';
+import 'package:my_reader/domain/entities/book_entity.dart';
+import 'package:my_reader/domain/entities/reading_position.dart';
 import 'package:my_reader/presentation/screens/reader_screen.dart';
+import 'package:share_plus/share_plus.dart';
 
-class QuotesScreen extends ConsumerWidget {
+class QuotesScreen extends ConsumerStatefulWidget {
   const QuotesScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final booksAsync = ref.watch(getBooksProvider(null));
+  _QuotesScreenState createState() => _QuotesScreenState();
+}
 
-    return Scaffold(
-      backgroundColor: const Color(0xFFEDE7D9),
-      appBar: AppBar(
-        backgroundColor: const Color(0xFFBCAAA4),
-        title: const Text(
-          'Цитаты',
-          style: TextStyle(color: Color(0xFF4E342E)),
+class _QuotesScreenState extends ConsumerState<QuotesScreen> {
+  List<Map<String, dynamic>> _quotes = [];
+  bool _isLoading = true;
+  final Map<int, BookEntity> _booksCache = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _loadQuotes();
+  }
+
+  Future<void> _loadQuotes() async {
+    try {
+      final allQuotes = await DatabaseHelper.instance.getQuotesWithDetails();
+      final quotesWithBooks = <Map<String, dynamic>>[];
+
+      for (final quote in allQuotes) {
+        final bookId = quote['book_id'] as int;
+        BookEntity? book;
+
+        if (_booksCache.containsKey(bookId)) {
+          book = _booksCache[bookId];
+        } else {
+          book = await DatabaseHelper.instance.getBookById(bookId);
+          if (book != null) {
+            _booksCache[bookId] = book;
+          }
+        }
+
+        if (book != null) {
+          quotesWithBooks.add({
+            'quote': quote,
+            'book': book,
+          });
+        }
+      }
+
+      setState(() {
+        _quotes = quotesWithBooks;
+        _isLoading = false;
+      });
+    } catch (e) {
+      print('Error loading quotes: $e');
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
+  void _goToQuote(Map<String, dynamic> quoteData) async {
+    final quote = quoteData['quote'];
+    final book = quoteData['book'] as BookEntity;
+
+    final chapterIndex = (quote['chapter_index'] as num?)?.toDouble() ?? (quote['position'] as num).toDouble();
+    final charOffset = quote['char_offset'] as int? ?? 0;
+
+    await DatabaseHelper.instance.updatePosition(book.id, chapterIndex);
+    final updatedBook = book.copyWith(position: chapterIndex);
+
+    final initialCharOffset = book.format == 'EPUB' ? null : charOffset;
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ReaderScreen(
+          book: updatedBook,
+          initialCharOffset: initialCharOffset,
         ),
       ),
-      body: booksAsync.when(
-        data: (books) {
-          if (books.isEmpty) {
-            return const Center(
-              child: Text(
-                'Нет книг',
-                style: TextStyle(color: Color(0xFF4E342E)),
-              ),
-            );
-          }
-          return ListView.builder(
-            padding: const EdgeInsets.all(16.0),
-            itemCount: books.length,
-            itemBuilder: (context, index) {
-              final book = books[index];
-              return FutureBuilder<List<Map<String, dynamic>>>(
-                future: DatabaseHelper.instance.getQuotes(book.id),
-                builder: (context, snapshot) {
-                  if (snapshot.connectionState == ConnectionState.waiting) {
-                    return const ListTile(
-                      title: Text(
-                        'Загрузка...',
-                        style: TextStyle(color: Color(0xFF4E342E)),
-                      ),
-                    );
-                  }
-                  if (snapshot.hasError) {
-                    return ListTile(
-                      title: Text(
-                        'Ошибка: ${snapshot.error}',
-                        style: const TextStyle(color: Color(0xFF4E342E)),
-                      ),
-                    );
-                  }
-                  final quotes = snapshot.data ?? [];
-                  if (quotes.isEmpty) {
-                    return Container(); // Пропускаем книги без цитат
-                  }
-                  return ExpansionTile(
-                    title: Text(
-                      book.title,
-                      style: const TextStyle(
-                        color: Color(0xFF4E342E),
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    subtitle: Text(
-                      book.author,
-                      style: const TextStyle(color: Color(0xFF4E342E)),
-                    ),
-                    children: quotes.map((quote) {
-                      return Dismissible(
-                        key: Key(quote['id'].toString()),
-                        direction: DismissDirection.endToStart,
-                        background: Container(
-                          color: Colors.red,
-                          alignment: Alignment.centerRight,
-                          padding: const EdgeInsets.only(right: 20.0),
-                          child: const Icon(Icons.delete, color: Colors.white),
-                        ),
-                        onDismissed: (direction) async {
-                          await DatabaseHelper.instance.deleteQuote(quote['id']);
-                          ref.refresh(getBooksProvider(null)); // Обновляем, чтобы триггернуть rebuild
-                        },
-                        child: ListTile(
-                          title: Text(
-                            quote['quote_text'],
-                            style: const TextStyle(color: Color(0xFF4E342E)),
-                          ),
-                          subtitle: Text(
-                            quote['comment'] ?? 'Без комментария',
-                            style: const TextStyle(color: Color(0xFF4E342E)),
-                          ),
-                          onTap: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => ReaderScreen(book: book),
-                              ),
-                            );
-                          },
-                        ),
-                      );
-                    }).toList(),
-                  );
-                },
-              );
-            },
-          );
-        },
-        loading: () => const Center(
-          child: CircularProgressIndicator(
-            valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF7B5E57)),
+    ).then((_) {
+      _loadQuotes();
+    });
+  }
+
+  void _shareQuote(Map<String, dynamic> quoteData) {
+    final quote = quoteData['quote'];
+    final book = quoteData['book'] as BookEntity;
+    final quoteText = quote['quote_text'] as String?;
+    final comment = quote['comment'] as String?;
+
+    if (quoteText != null) {
+      String shareText = '"$quoteText" - ${book.author}. ${book.title}.';
+
+      // Добавляем комментарий если он есть
+      if (comment != null && comment.isNotEmpty) {
+        shareText += '\n:: $comment';
+      }
+
+      Share.share(shareText);
+    }
+  }
+
+
+  Future<void> _deleteQuote(Map<String, dynamic> quoteData) async {
+    final quote = quoteData['quote'];
+    final quoteId = quote['id'] as int;
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFFEDE7D9),
+        title: const Text(
+          'Удалить цитату?',
+          style: TextStyle(
+            color: Color(0xFF4E342E),
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
           ),
         ),
-        error: (error, stack) => Center(
-          child: Text(
-            'Ошибка: $error',
-            style: const TextStyle(color: Color(0xFF4E342E)),
+        content: Text(
+          'Вы уверены, что хотите удалить эту цитату?',
+          style: const TextStyle(
+            color: Color(0xFF4E342E),
+            fontSize: 14,
           ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text(
+              'Отмена',
+              style: TextStyle(color: Color(0xFF4E342E)),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text(
+              'Удалить',
+              style: TextStyle(color: Color(0xFF4E342E)),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (result == true) {
+      try {
+        await DatabaseHelper.instance.deleteQuoteById(quoteId);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Цитата удалена'),
+            backgroundColor: Color(0xFF8D6E63),
+            duration: Duration(seconds: 2),
+          ),
+        );
+        await _loadQuotes();
+      } catch (e) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Ошибка удаления: $e'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    }
+  }
+
+  Widget _buildQuoteItem(Map<String, dynamic> quoteData) {
+    final quote = quoteData['quote'];
+    final book = quoteData['book'] as BookEntity;
+    final quoteText = quote['quote_text'] as String?;
+    final comment = quote['comment'] as String?;
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 6.0),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF5F1EB),
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 3,
+            offset: const Offset(0, 1),
+          ),
+        ],
+        border: Border.all(
+          color: const Color(0xFFD7CCC8),
+          width: 1,
+        ),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: () => _goToQuote(quoteData),
+          child: Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      Icons.format_quote,
+                      color: const Color(0xFF8D6E63).withOpacity(0.7),
+                      size: 16,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        book.title,
+                        style: const TextStyle(
+                          color: Color(0xFF6D4C41),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                if (quoteText != null)
+                  Text(
+                    quoteText,
+                    style: const TextStyle(
+                      color: Color(0xFF4E342E),
+                      fontSize: 14,
+                      height: 1.4,
+                      fontStyle: FontStyle.italic,
+                    ),
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                if (comment != null && comment.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFE8D8C7),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      comment,
+                      style: const TextStyle(
+                        color: Color(0xFF5D4037),
+                        fontSize: 12,
+                        height: 1.3,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        book.author,
+                        style: const TextStyle(
+                          color: Color(0xFF8D6E63),
+                          fontSize: 11,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    if (quoteText != null)
+                      IconButton(
+                        icon: Icon(
+                          Icons.share,
+                          color: const Color(0xFF8D6E63).withOpacity(0.7),
+                          size: 18,
+                        ),
+                        onPressed: () => _shareQuote(quoteData),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(
+                          minWidth: 30,
+                          minHeight: 30,
+                        ),
+                        tooltip: 'Поделиться',
+                      ),
+                    IconButton(
+                      icon: Icon(
+                        Icons.delete_outline,
+                        color: const Color(0xFF8D6E63).withOpacity(0.7),
+                        size: 18,
+                      ),
+                      onPressed: () => _deleteQuote(quoteData),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(
+                        minWidth: 30,
+                        minHeight: 30,
+                      ),
+                      tooltip: 'Удалить',
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLoading() {
+    return const Center(
+      child: CircularProgressIndicator(
+        valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF7B5E57)),
+        strokeWidth: 2,
+      ),
+    );
+  }
+
+  Widget _buildEmpty() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(40.0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.format_quote,
+              size: 50,
+              color: Colors.brown[300],
+            ),
+            const SizedBox(height: 20),
+            Text(
+              'Пока нет цитат',
+              style: TextStyle(
+                color: Colors.brown[700],
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Выделяйте текст в книгах и сохраняйте\nпонравившиеся цитаты',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.brown[600],
+                fontSize: 13,
+                height: 1.4,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFF8F4F0),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFFBCAAA4),
+        elevation: 0,
+        title: const Text(
+          'Мои цитаты',
+          style: TextStyle(
+            color: Color(0xFF4E342E),
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        actions: [
+          if (_quotes.isNotEmpty)
+            IconButton(
+              icon: const Icon(
+                Icons.refresh,
+                color: Color(0xFF4E342E),
+                size: 20,
+              ),
+              onPressed: _loadQuotes,
+              tooltip: 'Обновить',
+            ),
+        ],
+      ),
+      body: _isLoading
+          ? _buildLoading()
+          : _quotes.isEmpty
+          ? _buildEmpty()
+          : RefreshIndicator(
+        onRefresh: _loadQuotes,
+        backgroundColor: const Color(0xFFF8F4F0),
+        color: const Color(0xFF8D6E63),
+        child: ListView.builder(
+          padding: const EdgeInsets.symmetric(vertical: 12.0),
+          itemCount: _quotes.length,
+          itemBuilder: (context, index) {
+            return _buildQuoteItem(_quotes[index]);
+          },
         ),
       ),
     );

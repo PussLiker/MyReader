@@ -2,127 +2,309 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_html/flutter_html.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
-import 'package:epubx/epubx.dart' as epub;
-import 'package:xml/xml.dart';
 import 'package:my_reader/data/db/database_helper.dart';
 import 'package:my_reader/domain/entities/book_entity.dart';
+import 'package:my_reader/domain/entities/chapter_entity.dart';
+import 'package:my_reader/domain/entities/reading_position.dart';
+import 'package:my_reader/data/parsers/epub_parser.dart';
+import 'package:my_reader/data/parsers/fb2_parser.dart';
+import 'package:my_reader/data/parsers/txt_parser.dart';
 import 'package:share_plus/share_plus.dart';
 
 class ReaderScreen extends ConsumerStatefulWidget {
   final BookEntity book;
-  const ReaderScreen({required this.book, super.key});
+  final int? initialCharOffset;
+  const ReaderScreen({required this.book, this.initialCharOffset, super.key});
 
   @override
   _ReaderScreenState createState() => _ReaderScreenState();
 }
 
 class _ReaderScreenState extends ConsumerState<ReaderScreen> {
-  int _currentPosition = 0;
-  List<epub.EpubChapter>? _chapters;
-  List<String>? _paragraphs;
-  String? _selectedText;
-  epub.EpubBook? _epubBook;
-  int _totalPositions = 1;
-  final _contentKey = GlobalKey();
+  double _currentChapterIndex = 0.0;
+  List<ChapterEntity> _chapters = [];
+  bool _isLoading = true;
+  String _errorMessage = '';
+  final _scrollController = ScrollController();
+  int _currentCharOffset = 0;
+  List<ReadingPosition> _bookmarks = [];
+  List<ReadingPosition> _quotes = [];
+  TextSelection _selection = const TextSelection.collapsed(offset: -1);
+  bool _isTextSelected = false;
+  bool _showSelectionToolbar = false;
 
   @override
   void initState() {
     super.initState();
-    _loadContent();
+    _loadBook();
   }
 
-  Future<void> _loadContent() async {
+  Future<void> _loadBook() async {
     try {
-      if (widget.book.format == 'EPUB') {
-        final epubBook = await epub.EpubReader.readBook(await File(widget.book.path).readAsBytes());
-        setState(() {
-          _epubBook = epubBook;
-          _chapters = epubBook.Chapters?.where((c) => c.HtmlContent != null).toList() ?? [];
-          _totalPositions = _chapters!.length > 0 ? _chapters!.length : 1;
-          _currentPosition = _currentPosition.clamp(0, _totalPositions - 1);
-        });
-      } else {
-        final content = await _loadRawContent();
-        setState(() {
-          _paragraphs = content.split('\n\n').where((p) => p.trim().isNotEmpty).toList();
-          _totalPositions = _paragraphs!.length > 0 ? _paragraphs!.length : 1;
-          _currentPosition = _currentPosition.clamp(0, _totalPositions - 1);
-        });
+      final updatedBook = await DatabaseHelper.instance.getBookById(widget.book.id);
+      _currentChapterIndex = updatedBook?.position ?? 0.0;
+
+      await _loadBookmarksAndQuotes();
+
+      List<ChapterEntity> chapters = [];
+
+      switch (widget.book.format) {
+        case 'EPUB':
+          final parser = EpubParser();
+          chapters = await parser.parseChapters(widget.book.path);
+          break;
+        case 'FB2':
+          final parser = Fb2Parser();
+          chapters = await parser.parseChapters(widget.book.path);
+          break;
+        case 'TXT':
+          final parser = TxtParser();
+          chapters = await parser.parseChapters(widget.book.path);
+          break;
+        default:
+          throw Exception('Неподдерживаемый формат: ${widget.book.format}');
       }
-      await _updateProgress();
+
+      setState(() {
+        _chapters = chapters;
+        _isLoading = false;
+        if (_chapters.isNotEmpty) {
+          _currentChapterIndex = _currentChapterIndex.clamp(0.0, _chapters.length - 1.0);
+        }
+      });
+
+      // Обрабатываем начальную позицию после загрузки
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _handleInitialPosition();
+      });
+
     } catch (e) {
+      setState(() {
+        _isLoading = false;
+        _errorMessage = 'Ошибка загрузки книги: $e';
+      });
+    }
+  }
+
+  void _handleInitialPosition() {
+    if (widget.initialCharOffset != null && _chapters.isNotEmpty) {
+      _scrollToCharOffset(widget.initialCharOffset!);
+    }
+  }
+
+  Future<void> _loadBookmarksAndQuotes() async {
+    try {
+      final bookmarks = await DatabaseHelper.instance.getBookmarksWithPosition(widget.book.id);
+      final quotes = await DatabaseHelper.instance.getQuotesWithPosition(widget.book.id);
+
+      setState(() {
+        _bookmarks = bookmarks;
+        _quotes = quotes;
+      });
+    } catch (e) {
+      print('Error loading bookmarks and quotes: $e');
+    }
+  }
+
+  ChapterEntity? get _currentChapter {
+    if (_chapters.isEmpty || _currentChapterIndex >= _chapters.length) {
+      return null;
+    }
+    return _chapters[_currentChapterIndex.floor()];
+  }
+
+  Future<void> _savePosition() async {
+    try {
+      await DatabaseHelper.instance.updatePosition(widget.book.id, _currentChapterIndex);
+    } catch (e) {
+      print('Error saving position: $e');
+    }
+  }
+
+  void _goToPosition(double chapterIndex, [int charOffset = 0]) {
+    if (chapterIndex < 0 || chapterIndex >= _chapters.length) return;
+
+    setState(() {
+      _currentChapterIndex = chapterIndex;
+      _currentCharOffset = charOffset;
+      _isTextSelected = false;
+      _showSelectionToolbar = false;
+    });
+
+    _savePosition();
+    _scrollController.jumpTo(0);
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _scrollToCharOffset(charOffset);
+    });
+  }
+
+  void _scrollToCharOffset(int charOffset) {
+    if (charOffset <= 0) return;
+
+    final chapter = _currentChapter;
+    if (chapter == null) return;
+
+    // Для EPUB информируем пользователя
+    if (widget.book.format == 'EPUB') {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Ошибка загрузки книги: $e',
-            style: const TextStyle(color: Color(0xFF4E342E)),
-          ),
-          backgroundColor: const Color(0xFFBCAAA4),
+        const SnackBar(
+          content: Text('Точная навигация к строке недоступна для EPUB формата'),
+          backgroundColor: Colors.orange,
+          duration: Duration(seconds: 3),
         ),
       );
+      return;
     }
-  }
 
-  Future<String> _loadRawContent() async {
-    try {
-      if (widget.book.format == 'EPUB') {
-        final chapter = _chapters != null && _currentPosition < _chapters!.length
-            ? _chapters![_currentPosition]
-            : null;
-        return chapter?.HtmlContent ?? 'Контент не найден';
-      } else if (widget.book.format == 'TXT') {
-        final content = await File(widget.book.path).readAsString();
-        return content.isNotEmpty ? content : 'Контент не найден';
-      } else if (widget.book.format == 'FB2') {
-        final xmlString = await File(widget.book.path).readAsString();
-        final document = XmlDocument.parse(xmlString);
-        final sections = document.findAllElements('section').toList();
-        if (_currentPosition < sections.length) {
-          final section = sections[_currentPosition];
-          final paragraphs = section.findAllElements('p').map((p) {
-            final text = p.text.trim();
-            final isBold = p.findElements('strong').isNotEmpty;
-            final isItalic = p.findElements('emphasis').isNotEmpty;
-            return '<p${isBold ? ' style="font-weight: bold;"' : ''}${isItalic ? ' style="font-style: italic;"' : ''}>$text</p>';
-          }).join('\n');
-          return paragraphs.isNotEmpty ? paragraphs : 'Контент не найден';
-        }
-        return 'Контент не найден';
-      }
-      return 'Формат не поддерживается';
-    } catch (e) {
-      return 'Ошибка загрузки: $e';
-    }
-  }
+    final textLength = chapter.content.length;
+    if (textLength == 0) return;
 
-  Future<void> _updateProgress() async {
-    if (_totalPositions > 0) {
-      final progress = ((_currentPosition + 1) * 100 ~/ _totalPositions).clamp(0, 100);
-      await DatabaseHelper.instance.updateProgress(widget.book.id, progress);
-    }
-  }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Future.delayed(const Duration(milliseconds: 300), () {
+        if (!_scrollController.hasClients) return;
 
-  void _nextPosition() {
-    setState(() {
-      if (_currentPosition < _totalPositions - 1) {
-        _currentPosition++;
-        _contentKey.currentState?.setState(() {});
-        _updateProgress();
-      }
+        final textRatio = charOffset / textLength;
+        final maxScroll = _scrollController.position.maxScrollExtent;
+        final targetPosition = (maxScroll * textRatio).clamp(0.0, maxScroll);
+
+        _scrollController.animateTo(
+          targetPosition,
+          duration: const Duration(milliseconds: 800),
+          curve: Curves.easeInOut,
+        );
+      });
     });
   }
 
-  void _previousPosition() {
-    setState(() {
-      if (_currentPosition > 0) {
-        _currentPosition--;
-        _contentKey.currentState?.setState(() {});
-        _updateProgress();
-      }
-    });
+  void _nextChapter() {
+    if (_currentChapterIndex < _chapters.length - 1) {
+      _goToPosition(_currentChapterIndex + 1.0);
+    }
   }
 
-  void _addBookmarkDialog() {
+  void _previousChapter() {
+    if (_currentChapterIndex > 0) {
+      _goToPosition(_currentChapterIndex - 1.0);
+    }
+  }
+
+  void _showChaptersDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        backgroundColor: const Color(0xFFEDE7D9),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxHeight: 500),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Padding(
+                padding: EdgeInsets.all(16.0),
+                child: Text(
+                  'Оглавление',
+                  style: TextStyle(
+                    color: Color(0xFF4E342E),
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              Expanded(
+                child: _chapters.isEmpty
+                    ? const Center(
+                  child: Text(
+                    'Нет глав',
+                    style: TextStyle(color: Color(0xFF4E342E)),
+                  ),
+                )
+                    : ListView.builder(
+                  itemCount: _chapters.length,
+                  itemBuilder: (context, index) {
+                    final chapter = _chapters[index];
+                    return ListTile(
+                      leading: Container(
+                        width: 30,
+                        height: 30,
+                        decoration: BoxDecoration(
+                          color: index == _currentChapterIndex.floor()
+                              ? const Color(0xFF8D6E63)
+                              : const Color(0xFFBCAAA4),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Center(
+                          child: Text(
+                            '${index + 1}',
+                            style: const TextStyle(
+                              color: Color(0xFF4E342E),
+                              fontWeight: FontWeight.bold,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ),
+                      ),
+                      title: Text(
+                        chapter.title,
+                        style: TextStyle(
+                          color: const Color(0xFF4E342E),
+                          fontWeight: index == _currentChapterIndex.floor()
+                              ? FontWeight.bold
+                              : FontWeight.normal,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      onTap: () {
+                        Navigator.pop(context);
+                        _goToPosition(index.toDouble());
+                      },
+                    );
+                  },
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text(
+                    'Закрыть',
+                    style: TextStyle(color: Color(0xFF4E342E)),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _addBookmarkAtSelection() {
+    if (!_selection.isValid || _selection.start == _selection.end) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Выделите текст для закладки'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    final selectedText = _currentChapter!.content.substring(
+      _selection.start,
+      _selection.end,
+    ).trim();
+
+    final position = ReadingPosition(
+      chapterIndex: _currentChapterIndex,
+      charOffset: _selection.start,
+      selectedText: selectedText,
+    );
+
+    _showBookmarkDialog(position);
+  }
+
+  void _showBookmarkDialog(ReadingPosition position) {
     final controller = TextEditingController();
     showDialog(
       context: context,
@@ -132,16 +314,43 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
           'Добавить закладку',
           style: TextStyle(color: Color(0xFF4E342E)),
         ),
-        content: TextField(
-          controller: controller,
-          decoration: const InputDecoration(
-            labelText: 'Комментарий',
-            labelStyle: TextStyle(color: Color(0xFF4E342E)),
-            enabledBorder: UnderlineInputBorder(
-              borderSide: BorderSide(color: Color(0xFF7B5E57)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (position.selectedText != null) ...[
+              const Text(
+                'Выделенный текст:',
+                style: TextStyle(
+                  color: Color(0xFF4E342E),
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFBCAAA4),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  position.selectedText!,
+                  style: const TextStyle(color: Color(0xFF4E342E)),
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+            TextField(
+              controller: controller,
+              decoration: const InputDecoration(
+                labelText: 'Комментарий',
+                labelStyle: TextStyle(color: Color(0xFF4E342E)),
+                enabledBorder: UnderlineInputBorder(
+                  borderSide: BorderSide(color: Color(0xFF7B5E57)),
+                ),
+              ),
+              style: const TextStyle(color: Color(0xFF4E342E)),
             ),
-          ),
-          style: const TextStyle(color: Color(0xFF4E342E)),
+          ],
         ),
         actions: [
           TextButton(
@@ -153,21 +362,33 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
           ),
           TextButton(
             onPressed: () async {
-              await DatabaseHelper.instance.addBookmark(
-                widget.book.id,
-                _currentPosition,
-                controller.text.isEmpty ? 'Закладка' : controller.text,
-              );
-              Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text(
-                    'Закладка добавлена',
-                    style: TextStyle(color: Color(0xFF4E342E)),
+              try {
+                await DatabaseHelper.instance.addBookmarkWithPosition(
+                  widget.book.id,
+                  position,
+                  controller.text.isEmpty ? 'Закладка' : controller.text,
+                );
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Закладка добавлена'),
+                    backgroundColor: Color(0xFF8D6E63),
                   ),
-                  backgroundColor: Color(0xFFBCAAA4),
-                ),
-              );
+                );
+                await _loadBookmarksAndQuotes();
+                setState(() {
+                  _isTextSelected = false;
+                  _showSelectionToolbar = false;
+                });
+              } catch (e) {
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Ошибка: $e'),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+              }
             },
             child: const Text(
               'Сохранить',
@@ -179,8 +400,32 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     );
   }
 
-  void _saveQuoteDialog(String selectedText) {
-    if (selectedText.isEmpty) return;
+  void _saveQuoteAtSelection() {
+    if (!_selection.isValid || _selection.start == _selection.end) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Выделите текст для цитаты'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    final selectedText = _currentChapter!.content.substring(
+      _selection.start,
+      _selection.end,
+    ).trim();
+
+    final position = ReadingPosition(
+      chapterIndex: _currentChapterIndex,
+      charOffset: _selection.start,
+      selectedText: selectedText,
+    );
+
+    _showQuoteDialog(position, selectedText);
+  }
+
+  void _showQuoteDialog(ReadingPosition position, String selectedText) {
     final noteController = TextEditingController();
     showDialog(
       context: context,
@@ -192,11 +437,28 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
         ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              selectedText,
-              style: const TextStyle(color: Color(0xFF4E342E)),
+            const Text(
+              'Выделенный текст:',
+              style: TextStyle(
+                color: Color(0xFF4E342E),
+                fontWeight: FontWeight.bold,
+              ),
             ),
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFBCAAA4),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                selectedText,
+                style: const TextStyle(color: Color(0xFF4E342E)),
+              ),
+            ),
+            const SizedBox(height: 16),
             TextField(
               controller: noteController,
               decoration: const InputDecoration(
@@ -219,156 +481,665 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
             ),
           ),
           TextButton(
+            onPressed: () => _shareQuote(
+              selectedText,
+              comment: noteController.text, // Передаем комментарий
+            ),
+            child: const Text(
+              'Поделиться',
+              style: TextStyle(color: Color(0xFF4E342E)),
+            ),
+          ),
+          TextButton(
             onPressed: () async {
-              await DatabaseHelper.instance.addQuote(
-                widget.book.id,
-                _currentPosition,
-                selectedText,
-                noteController.text.isEmpty ? null : noteController.text,
-              );
-              Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text(
-                    'Цитата сохранена',
-                    style: TextStyle(color: Color(0xFF4E342E)),
+              try {
+                await DatabaseHelper.instance.addQuoteWithPosition(
+                  widget.book.id,
+                  position,
+                  selectedText,
+                  noteController.text.isEmpty ? null : noteController.text,
+                );
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Цитата сохранена'),
+                    backgroundColor: Color(0xFF8D6E63),
                   ),
-                  backgroundColor: Color(0xFFBCAAA4),
-                ),
-              );
+                );
+                await _loadBookmarksAndQuotes();
+                setState(() {
+                  _isTextSelected = false;
+                  _showSelectionToolbar = false;
+                });
+              } catch (e) {
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Ошибка: $e'),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+              }
             },
             child: const Text(
               'Сохранить',
               style: TextStyle(color: Color(0xFF4E342E)),
             ),
           ),
-          TextButton(
-            onPressed: () {
-              Share.share(selectedText);
-              Navigator.pop(context);
-            },
-            child: const Text(
-              'Поделиться',
-              style: TextStyle(color: Color(0xFF4E342E)),
-            ),
-          ),
         ],
       ),
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFFEDE7D9),
-      appBar: AppBar(
-        backgroundColor: const Color(0xFFBCAAA4),
-        title: Text(
-          widget.book.title,
-          style: const TextStyle(color: Color(0xFF4E342E)),
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.bookmark_add, color: Color(0xFF7B5E57)),
-            onPressed: _addBookmarkDialog,
-          ),
-        ],
-      ),
-      body: FutureBuilder<String>(
-        key: _contentKey,
-        future: _loadRawContent(),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(
-              child: CircularProgressIndicator(
-                valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF7B5E57)),
-              ),
-            );
-          }
-          if (snapshot.hasError) {
-            return Center(
-              child: Text(
-                'Ошибка загрузки контента: ${snapshot.error}',
-                style: const TextStyle(color: Color(0xFF4E342E)),
-              ),
-            );
-          }
-          final content = snapshot.data ?? 'Контент не найден';
+  void _shareQuote(String text, {String? comment}) {
+    String shareText = '"$text" - ${widget.book.author}. ${widget.book.title}.';
 
-          return SingleChildScrollView(
-            padding: const EdgeInsets.all(16.0),
-            child: widget.book.format == 'EPUB'
-                ? Html(
-              data: content,
-              style: {
-                'body': Style(
-                  fontSize: FontSize(16.0),
-                  color: const Color(0xFF4E342E),
+    // Добавляем комментарий если он есть
+    if (comment != null && comment.isNotEmpty) {
+      shareText += '\n:: $comment';
+    }
+
+    Share.share(shareText);
+  }
+
+  void _goToBookmark(ReadingPosition position) {
+    if (widget.book.format == 'EPUB') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Для EPUB переход осуществляется к началу главы'),
+          backgroundColor: Color(0xFF8D6E63),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
+
+    _goToPosition(position.chapterIndex, position.charOffset);
+
+    if (position.selectedText != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Закладка: ${position.selectedText}'),
+          backgroundColor: const Color(0xFF8D6E63),
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
+  }
+
+  void _showBookmarksDialog() {
+    if (_bookmarks.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Нет закладок'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        backgroundColor: const Color(0xFFEDE7D9),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxHeight: 400),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Padding(
+                padding: EdgeInsets.all(16.0),
+                child: Text(
+                  'Цитаты',
+                  style: TextStyle(
+                    color: Color(0xFF4E342E),
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
-                'p': Style(margin: Margins.all(8.0)),
-                'img': Style(
-                  // Заглушка для сломанных изображений
-                  display: Display.block,
-                  width: Width(100),
-                  height: Height(100),
-                  backgroundColor: const Color(0xFF7B5E57),
-                ),
-              },
-              onLinkTap: (url, _, __) => print('Tapped link: $url'),
-            )
-                : SelectableText(
-              _paragraphs != null && _currentPosition < _paragraphs!.length
-                  ? _paragraphs![_currentPosition]
-                  : content,
-              style: const TextStyle(
-                fontSize: 16,
-                height: 1.5,
-                color: Color(0xFF4E342E),
               ),
-              onSelectionChanged: (selection, cause) {
-                if (selection.isValid) {
-                  final text = _paragraphs != null &&
-                      _currentPosition < _paragraphs!.length
-                      ? _paragraphs![_currentPosition].substring(
-                      selection.start.clamp(0, _paragraphs![_currentPosition].length),
-                      selection.end.clamp(0, _paragraphs![_currentPosition].length))
-                      : content.substring(
-                      selection.start.clamp(0, content.length),
-                      selection.end.clamp(0, content.length));
-                  setState(() {
-                    _selectedText = text;
-                  });
-                  _saveQuoteDialog(text);
-                }
-              },
-            ),
-          );
-        },
+              Expanded(
+                child: ListView.builder(
+                  itemCount: _quotes.length,
+                  itemBuilder: (context, index) {
+                    final quote = _quotes[index];
+                    final chapterTitle = quote.chapterIndex < _chapters.length
+                        ? _chapters[quote.chapterIndex.floor()].title
+                        : 'Глава ${quote.chapterIndex.floor() + 1}';
+
+                    return ListTile(
+                      leading: const Icon(Icons.format_quote, color: Color(0xFF7B5E57)),
+                      title: Text(
+                        quote.selectedText ?? 'Цитата',
+                        style: const TextStyle(color: Color(0xFF4E342E)),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      subtitle: Text(
+                        '${quote.comment ?? ''} • $chapterTitle',
+                        style: const TextStyle(color: Color(0xFF8D6E63)),
+                        maxLines: 2,
+                      ),
+                      trailing: IconButton(
+                        icon: const Icon(Icons.delete, color: Color(0xFF7B5E57), size: 18),
+                        onPressed: () => _deleteQuote(quote),
+                      ),
+                      onTap: () {
+                        Navigator.pop(context);
+                        _goToBookmark(quote);
+                      },
+                    );
+                  },
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text(
+                    'Закрыть',
+                    style: TextStyle(color: Color(0xFF4E342E)),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
-      bottomNavigationBar: BottomAppBar(
-        color: const Color(0xFFBCAAA4),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+    );
+}
+
+void _showQuotesDialog() {
+  if (_quotes.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Нет цитат'),
+        backgroundColor: Colors.orange,
+      ),
+    );
+    return;
+  }
+
+  showDialog(
+    context: context,
+    builder: (context) => Dialog(
+      backgroundColor: const Color(0xFFEDE7D9),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxHeight: 400),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            IconButton(
-              onPressed: _currentPosition > 0 ? _previousPosition : null,
-              icon: const Icon(Icons.arrow_back, color: Color(0xFF7B5E57)),
+            const Padding(
+              padding: EdgeInsets.all(16.0),
+              child: Text(
+                'Цитаты',
+                style: TextStyle(
+                  color: Color(0xFF4E342E),
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
             ),
-            Text(
-              widget.book.format == 'EPUB'
-                  ? 'Глава ${_currentPosition + 1}/$_totalPositions'
-                  : widget.book.format == 'FB2'
-                  ? 'Секция ${_currentPosition + 1}/$_totalPositions'
-                  : 'Абзац ${_currentPosition + 1}/$_totalPositions',
-              style: const TextStyle(color: Color(0xFF4E342E)),
+            Expanded(
+              child: ListView.builder(
+                itemCount: _quotes.length,
+                itemBuilder: (context, index) {
+                  final quote = _quotes[index];
+                  final chapterTitle = quote.chapterIndex < _chapters.length
+                      ? _chapters[quote.chapterIndex.floor()].title
+                      : 'Глава ${quote.chapterIndex.floor() + 1}';
+
+                  return ListTile(
+                    leading: const Icon(Icons.format_quote, color: Color(0xFF7B5E57)),
+                    title: Text(
+                      quote.selectedText ?? 'Цитата',
+                      style: const TextStyle(color: Color(0xFF4E342E)),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    subtitle: Text(
+                      '${quote.comment ?? ''} • $chapterTitle',
+                      style: const TextStyle(color: Color(0xFF8D6E63)),
+                      maxLines: 2,
+                    ),
+                    trailing: IconButton(
+                      icon: const Icon(Icons.delete, color: Color(0xFF7B5E57), size: 18),
+                      onPressed: () => _deleteQuote(quote),
+                    ),
+                    onTap: () {
+                      Navigator.pop(context);
+                      _goToBookmark(quote);
+                    },
+                  );
+                },
+              ),
             ),
-            IconButton(
-              onPressed: _currentPosition < _totalPositions - 1 ? _nextPosition : null,
-              icon: const Icon(Icons.arrow_forward, color: Color(0xFF7B5E57)),
+            Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text(
+                  'Закрыть',
+                  style: TextStyle(color: Color(0xFF4E342E)),
+                ),
+              ),
             ),
           ],
         ),
       ),
+    ),
+  );
+}
+
+Future<void> _deleteBookmark(ReadingPosition bookmark) async {
+  final result = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      backgroundColor: const Color(0xFFEDE7D9),
+      title: const Text(
+        'Удалить закладку?',
+        style: TextStyle(color: Color(0xFF4E342E)),
+      ),
+      content: Text(
+        'Вы уверены, что хотите удалить закладку "${bookmark.selectedText ?? 'без текста'}"?',
+        style: const TextStyle(color: Color(0xFF4E342E)),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text(
+            'Отмена',
+            style: TextStyle(color: Color(0xFF4E342E)),
+          ),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(context, true),
+          child: const Text(
+            'Удалить',
+            style: TextStyle(color: Color(0xFF4E342E)),
+          ),
+        ),
+      ],
+    ),
+  );
+
+  if (result == true && bookmark.id != null) {
+    try {
+      await DatabaseHelper.instance.deleteBookmarkById(bookmark.id!);
+      await _loadBookmarksAndQuotes();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Закладка удалена'),
+          backgroundColor: Color(0xFF8D6E63),
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Ошибка удаления: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+}
+
+Future<void> _deleteQuote(ReadingPosition quote) async {
+  final result = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      backgroundColor: const Color(0xFFEDE7D9),
+      title: const Text(
+        'Удалить цитату?',
+        style: TextStyle(color: Color(0xFF4E342E)),
+      ),
+      content: Text(
+        'Вы уверены, что хотите удалить цитату "${quote.selectedText ?? 'без текста'}"?',
+        style: const TextStyle(color: Color(0xFF4E342E)),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text(
+            'Отмена',
+            style: TextStyle(color: Color(0xFF4E342E)),
+          ),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(context, true),
+          child: const Text(
+            'Удалить',
+            style: TextStyle(color: Color(0xFF4E342E)),
+          ),
+        ),
+      ],
+    ),
+  );
+
+  if (result == true && quote.id != null) {
+    try {
+      await DatabaseHelper.instance.deleteQuoteById(quote.id!);
+      await _loadBookmarksAndQuotes();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Цитата удалена'),
+          backgroundColor: Color(0xFF8D6E63),
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Ошибка удаления: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+}
+
+Widget _buildLoading() {
+  return const Center(
+    child: CircularProgressIndicator(
+      valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF7B5E57)),
+    ),
+  );
+}
+
+Widget _buildError() {
+  return Center(
+    child: Padding(
+      padding: const EdgeInsets.all(16.0),
+      child: Text(
+        _errorMessage,
+        style: const TextStyle(color: Color(0xFF4E342E)),
+        textAlign: TextAlign.center,
+      ),
+    ),
+  );
+}
+
+Widget _buildNoContent() {
+  return const Center(
+    child: Text(
+      'Книга не содержит контента',
+      style: TextStyle(color: Color(0xFF4E342E)),
+    ),
+  );
+}
+
+Map<String, Style> _getHtmlStyles() {
+  return {
+    'body': Style(
+      fontSize: FontSize(18.0),
+      color: const Color(0xFF4E342E),
+      lineHeight: LineHeight(1.6),
+      margin: Margins.zero,
+      padding: HtmlPaddings.zero,
+    ),
+    'p': Style(
+      margin: Margins.only(bottom: 16.0),
+    ),
+    'h1': Style(
+      fontSize: FontSize(24.0),
+      fontWeight: FontWeight.bold,
+      margin: Margins.only(bottom: 16.0, top: 24.0),
+    ),
+    'h2': Style(
+      fontSize: FontSize(20.0),
+      fontWeight: FontWeight.bold,
+      margin: Margins.only(bottom: 12.0, top: 20.0),
+    ),
+    'strong': Style(
+      fontWeight: FontWeight.bold,
+    ),
+    'em': Style(
+      fontStyle: FontStyle.italic,
+    ),
+  };
+}
+
+TextSpan _buildTextWithHighlights(String text) {
+  final spans = <TextSpan>[];
+  int currentPosition = 0;
+
+  final chapterQuotes = _quotes.where((q) =>
+  q.chapterIndex.floor() == _currentChapterIndex.floor()
+  ).toList();
+
+  chapterQuotes.sort((a, b) => a.charOffset.compareTo(b.charOffset));
+
+  for (final quote in chapterQuotes) {
+    if (quote.charOffset > currentPosition) {
+      spans.add(TextSpan(
+        text: text.substring(currentPosition, quote.charOffset),
+        style: const TextStyle(
+          fontSize: 18.0,
+          height: 1.6,
+          color: Color(0xFF4E342E),
+        ),
+      ));
+    }
+
+    final quoteText = quote.selectedText ?? '';
+    final quoteEnd = quote.charOffset + quoteText.length;
+    if (quoteEnd <= text.length) {
+      spans.add(TextSpan(
+        text: text.substring(quote.charOffset, quoteEnd),
+        style: const TextStyle(
+          fontSize: 18.0,
+          height: 1.6,
+          color: Color(0xFF4E342E),
+          backgroundColor: Color(0xFFFFF8E1),
+          fontStyle: FontStyle.italic,
+        ),
+      ));
+    }
+
+    currentPosition = quoteEnd;
+  }
+
+  if (currentPosition < text.length) {
+    spans.add(TextSpan(
+      text: text.substring(currentPosition),
+      style: const TextStyle(
+        fontSize: 18.0,
+        height: 1.6,
+        color: Color(0xFF4E342E),
+      ),
+    ));
+  }
+
+  return TextSpan(children: spans);
+}
+
+Widget _buildSelectionToolbar() {
+  return Positioned(
+    bottom: 80,
+    left: 20,
+    right: 20,
+    child: Card(
+      color: const Color(0xFFBCAAA4),
+      elevation: 4,
+      child: Padding(
+        padding: const EdgeInsets.all(8.0),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            IconButton(
+              icon: const Icon(Icons.bookmark_add, color: Color(0xFF4E342E)),
+              onPressed: _addBookmarkAtSelection,
+              tooltip: 'Добавить закладку',
+            ),
+            IconButton(
+              icon: const Icon(Icons.format_quote, color: Color(0xFF4E342E)),
+              onPressed: _saveQuoteAtSelection,
+              tooltip: 'Сохранить цитату',
+            ),
+            IconButton(
+              icon: const Icon(Icons.share, color: Color(0xFF4E342E)),
+              onPressed: () {
+                if (_selection.isValid && _selection.start != _selection.end) {
+                  final selectedText = _currentChapter!.content.substring(
+                    _selection.start,
+                    _selection.end,
+                  ).trim();
+                  _shareQuote(selectedText); // Просто текст без комментария
+                }
+              },
+              tooltip: 'Поделиться',
+            ),
+            IconButton(
+              icon: const Icon(Icons.close, color: Color(0xFF4E342E)),
+              onPressed: () {
+                setState(() {
+                  _showSelectionToolbar = false;
+                  _isTextSelected = false;
+                });
+              },
+              tooltip: 'Закрыть',
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+Widget _buildContent() {
+  if (_isLoading) return _buildLoading();
+  if (_errorMessage.isNotEmpty) return _buildError();
+  if (_chapters.isEmpty) return _buildNoContent();
+
+  final chapter = _currentChapter;
+  if (chapter == null) return _buildError();
+
+  final contentPadding = const EdgeInsets.symmetric(horizontal: 20.0, vertical: 16.0);
+
+  if (widget.book.format == 'EPUB') {
+    return SingleChildScrollView(
+      controller: _scrollController,
+      padding: contentPadding,
+      child: Html(
+        data: chapter.content,
+        style: _getHtmlStyles(),
+      ),
+    );
+  } else {
+    return Stack(
+      children: [
+        SingleChildScrollView(
+          controller: _scrollController,
+          padding: contentPadding,
+          child: SelectableText.rich(
+            _buildTextWithHighlights(chapter.content),
+            onSelectionChanged: (selection, cause) {
+              setState(() {
+                _selection = selection;
+                _isTextSelected = selection.isValid && selection.start != selection.end;
+                _showSelectionToolbar = _isTextSelected;
+              });
+            },
+          ),
+        ),
+        if (_showSelectionToolbar && _isTextSelected)
+          _buildSelectionToolbar(),
+      ],
     );
   }
+}
+
+@override
+Widget build(BuildContext context) {
+  return Scaffold(
+    backgroundColor: const Color(0xFFEDE7D9),
+    appBar: AppBar(
+      backgroundColor: const Color(0xFFBCAAA4),
+      title: Text(
+        widget.book.title,
+        style: const TextStyle(color: Color(0xFF4E342E)),
+        overflow: TextOverflow.ellipsis,
+      ),
+      actions: [
+        if (_quotes.isNotEmpty)
+          IconButton(
+            icon: const Icon(Icons.format_quote, color: Color(0xFF7B5E57)),
+            onPressed: _showQuotesDialog,
+            tooltip: 'Цитаты',
+          ),
+        if (_bookmarks.isNotEmpty)
+          IconButton(
+            icon: const Icon(Icons.bookmarks, color: Color(0xFF7B5E57)),
+            onPressed: _showBookmarksDialog,
+            tooltip: 'Закладки',
+          ),
+        IconButton(
+          icon: const Icon(Icons.menu_book, color: Color(0xFF7B5E57)),
+          onPressed: _showChaptersDialog,
+          tooltip: 'Оглавление',
+        ),
+      ],
+    ),
+    body: GestureDetector(
+      onTap: () {
+        if (_showSelectionToolbar) {
+          setState(() {
+            _showSelectionToolbar = false;
+          });
+        }
+      },
+      child: _buildContent(),
+    ),
+    bottomNavigationBar: BottomAppBar(
+      color: const Color(0xFFBCAAA4),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            IconButton(
+              onPressed: _currentChapterIndex > 0 ? _previousChapter : null,
+              icon: const Icon(Icons.arrow_back, color: Color(0xFF7B5E57)),
+              tooltip: 'Предыдущая глава',
+            ),
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    _currentChapter?.title ?? 'Глава ${_currentChapterIndex.floor() + 1}',
+                    style: const TextStyle(
+                      color: Color(0xFF4E342E),
+                      fontSize: 12,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                  ),
+                  Text(
+                    '${_currentChapterIndex.floor() + 1} / ${_chapters.length}',
+                    style: const TextStyle(
+                      color: Color(0xFF4E342E),
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            IconButton(
+              onPressed: _currentChapterIndex < _chapters.length - 1 ? _nextChapter : null,
+              icon: const Icon(Icons.arrow_forward, color: Color(0xFF7B5E57)),
+              tooltip: 'Следующая глава',
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+@override
+void dispose() {
+  _scrollController.dispose();
+  super.dispose();
+}
 }

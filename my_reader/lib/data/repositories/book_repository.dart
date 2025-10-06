@@ -10,17 +10,24 @@ class BookRepository {
 
   BookRepository(this.databaseHelper);
 
-  Future<List<BookEntity>> getBooks() async {
-    return await databaseHelper.getBooks();
+  Future<List<BookEntity>> getBooks([String? category]) async {
+    return category == null
+        ? await databaseHelper.getBooks()
+        : await databaseHelper.getBooksByCategory(category);
   }
 
-  Future<int> addBook(String filePath, {String? categoryOverride}) async {
+  Future<int> addBook(
+      String filePath, {
+        String? categoryOverride,
+        String? titleOverride,
+        String? authorOverride,
+      }) async {
     final format = path.extension(filePath).toLowerCase().replaceFirst('.', '');
-    String title = path.basenameWithoutExtension(filePath);
-    String author = 'Unknown';
-    String? category;
+    String title = titleOverride ?? path.basenameWithoutExtension(filePath);
+    String author = authorOverride ?? 'Unknown';
+    String category = categoryOverride ?? 'Fiction';
 
-    if (format == 'epub') {
+    if (format == 'epub' && titleOverride == null && authorOverride == null) {
       try {
         final epub = await EpubReader.readBook(await File(filePath).readAsBytes());
         title = epub.Title ?? title;
@@ -28,16 +35,13 @@ class BookRepository {
         final metadata = epub.Schema?.Package?.Metadata;
         if (metadata != null && metadata.Subjects != null && metadata.Subjects!.isNotEmpty) {
           category = metadata.Subjects!.join(', ');
-        } else {
-          category = 'Fiction';
         }
       } catch (e) {
         print('Error reading EPUB: $e');
-        category = 'Fiction';
       }
-    } else if (format == 'txt') {
+    } else if (format == 'txt' && categoryOverride == null) {
       category = 'Text';
-    } else if (format == 'fb2') {
+    } else if (format == 'fb2' && titleOverride == null && authorOverride == null) {
       try {
         final xmlString = await File(filePath).readAsString();
         final document = XmlDocument.parse(xmlString);
@@ -49,17 +53,17 @@ class BookRepository {
         author = authorFirstName != null && authorLastName != null
             ? '$authorFirstName $authorLastName'
             : author;
-        category = genre ?? 'Fiction';
+        if (categoryOverride == null) {
+          category = genre ?? 'Fiction';
+        }
       } catch (e) {
         print('Error reading FB2: $e');
-        category = 'Fiction';
       }
-    } else {
+    } else if (!['epub', 'fb2', 'txt'].contains(format)) {
       throw Exception('Unsupported file format: $format');
     }
 
-    category = categoryOverride ?? category;
-    if (category != null && !await databaseHelper.categoryExists(category)) {
+    if (!await databaseHelper.categoryExists(category)) {
       await databaseHelper.insertCategory(category);
     }
 
@@ -69,7 +73,7 @@ class BookRepository {
       author: author,
       path: filePath,
       format: format.toUpperCase(),
-      coverPath: null, // Обложки пока не поддерживаются
+      coverPath: null,
       progress: 0,
       category: category,
     );
@@ -93,7 +97,7 @@ class BookRepository {
     await databaseHelper.updateProgress(bookId, progress);
   }
 
-  Future<int> addBookmark(int bookId, int position, String note) async {
+  Future<int> addBookmark(int bookId, double position, String note) async {
     return await databaseHelper.addBookmark(bookId, position, note);
   }
 
@@ -105,7 +109,7 @@ class BookRepository {
     await databaseHelper.deleteBookmark(bookmarkId);
   }
 
-  Future<int> addQuote(int bookId, int position, String quoteText, String? comment) async {
+  Future<int> addQuote(int bookId, double position, String quoteText, String? comment) async {
     return await databaseHelper.addQuote(bookId, position, quoteText, comment);
   }
 
