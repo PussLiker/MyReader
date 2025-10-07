@@ -7,7 +7,7 @@ class BookEntity {
   final String? coverPath;
   final int progress;
   final String? category;
-  final double position; // Меняем на double для точности
+  final double position;
 
   BookEntity({
     required this.id,
@@ -18,7 +18,7 @@ class BookEntity {
     this.coverPath,
     this.progress = 0,
     this.category,
-    this.position = 0.0, // По умолчанию 0.0
+    this.position = 0.0,
   });
 
   BookEntity copyWith({

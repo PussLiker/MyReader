@@ -21,6 +21,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
   final List<String> _categories = ['Все категории'];
   final TextEditingController _searchController = TextEditingController();
   bool _isDeleting = false;
+  final FocusNode _searchFocusNode = FocusNode();
 
   @override
   void initState() {
@@ -195,8 +196,10 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
         backgroundColor: const Color(0xFFBCAAA4),
         title: const Text(
           'Моя библиотека',
-          style: TextStyle(color: Color(0xFF4E342E)),
-        ),
+          style: TextStyle(
+              color: Color(0xFF4E342E),
+              fontWeight: FontWeight.w600),
+          ),
         leading: Builder(
           builder: (context) => IconButton(
             icon: const Icon(Icons.menu, color: Color(0xFF4E342E)),
@@ -370,6 +373,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
         children: [
           TextField(
             controller: _searchController,
+            focusNode: _searchFocusNode, // ДОБАВИТЬ ЭТУ СТРОКУ
             decoration: const InputDecoration(
               labelText: 'Поиск по названию',
               labelStyle: TextStyle(color: Color(0xFF4E342E)),
@@ -384,10 +388,15 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
               ),
             ),
             style: const TextStyle(color: Color(0xFF4E342E)),
+            autofocus: false,
             onChanged: (value) {
               setState(() {
                 _searchQuery = value;
               });
+            },
+            onTap: () {
+              // Опционально: автоматически фокусироваться только при явном тапе
+              _searchFocusNode.requestFocus();
             },
           ),
           const SizedBox(height: 16),
@@ -451,6 +460,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
       elevation: 2,
       margin: const EdgeInsets.symmetric(vertical: 8.0),
       child: ListTile(
+
         title: Text(
           book.title,
           style: const TextStyle(
@@ -462,22 +472,20 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
           '${book.author}${book.category != null ? ' • ${book.category}' : ''}',
           style: const TextStyle(color: Color(0xFF4E342E)),
         ),
-        leading: book.coverPath != null && File(book.coverPath!).existsSync()
-            ? Image.file(
-          File(book.coverPath!),
+
+        // В методе _buildBookItem замените leading на:
+        leading: Container(
           width: 50,
-          height: 50,
-          fit: BoxFit.cover,
-          errorBuilder: (context, error, stackTrace) => const Icon(
-            Icons.book,
-            color: Color(0xFF7B5E57),
-            size: 50,
+          height: 70,
+          decoration: BoxDecoration(
+            color: const Color(0xFF8D6E63),
+            borderRadius: BorderRadius.circular(8),
           ),
-        )
-            : const Icon(
-          Icons.book,
-          color: Color(0xFF7B5E57),
-          size: 50,
+          child: const Icon(
+            Icons.menu_book,
+            color: Colors.white,
+            size: 30,
+          ),
         ),
         // Альтернативный вариант - меню с тремя точками
         trailing: PopupMenuButton<String>(
@@ -526,6 +534,19 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
     );
   }
 
+  Widget _buildDefaultCover(BookEntity book) {
+    return Container(
+      width: 50,
+      height: 70,
+      color: Colors.brown[300],
+      child: Icon(
+        Icons.book,
+        color: Colors.white,
+        size: 30,
+      ),
+    );
+  }
+
   Widget _buildLoadingState() {
     return const Center(
       child: CircularProgressIndicator(
@@ -556,5 +577,11 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
         ],
       ),
     );
+  }
+
+  @override
+  void dispose() {
+    _searchFocusNode.dispose();
+    super.dispose();
   }
 }

@@ -9,29 +9,58 @@ class EpubParser {
       final epubBook = await epub.EpubReader.readBook(bytes);
       final chapters = <ChapterEntity>[];
 
-      // Сначала пробуем получить нормальные главы
-      int validChapterCount = 0;
-      for (final chapter in epubBook.Chapters ?? []) {
-        if (_isValidChapter(chapter)) {
-          final content = _cleanContent(chapter.HtmlContent!);
-          if (content.length > 100) { // Минимальная длина главы
-            chapters.add(ChapterEntity(
-              title: chapter.Title?.isNotEmpty == true
-                  ? chapter.Title!
-                  : 'Глава ${validChapterCount + 1}',
-              content: content,
-              index: validChapterCount,
-            ));
-            validChapterCount++;
+      // Используем Chapters из epubBook
+      if (epubBook.Chapters != null) {
+        int chapterIndex = 0;
+
+        for (final chapter in epubBook.Chapters!) {
+          if (_isValidChapter(chapter)) {
+            final content = _extractTextFromHtml(chapter.HtmlContent!);
+            if (content.trim().isNotEmpty) {
+              chapters.add(ChapterEntity(
+                title: chapter.Title?.isNotEmpty == true
+                    ? chapter.Title!
+                    : 'Глава ${chapterIndex + 1}',
+                content: content,
+                index: chapterIndex,
+              ));
+              chapterIndex++;
+            }
           }
         }
       }
 
-      // Если нормальных глав мало, создаем большие разделы
-      if (chapters.length <= 1 && epubBook.Chapters != null) {
-        return _createLargeSections(epubBook.Chapters!);
+      // Если глав не найдено, пробуем получить контент из Html файлов
+      if (chapters.isEmpty && epubBook.Content?.Html != null) {
+        int htmlIndex = 0;
+        for (final htmlFile in epubBook.Content!.Html!.values) {
+          if (htmlFile.Content != null && htmlFile.Content!.isNotEmpty) {
+            final content = _extractTextFromHtml(htmlFile.Content!);
+            if (content.trim().isNotEmpty) {
+              chapters.add(ChapterEntity(
+                title: 'Страница ${htmlIndex + 1}',
+                content: content,
+                index: htmlIndex,
+              ));
+              htmlIndex++;
+            }
+          }
+        }
       }
 
+      // Если все еще нет глав, создаем одну большую главу из всего контента
+      if (chapters.isEmpty) {
+        final allContent = await _extractAllContent(epubBook);
+        if (allContent.isNotEmpty) {
+          chapters.add(ChapterEntity(
+            title: 'Содержание',
+            content: allContent,
+            index: 0,
+          ));
+        }
+      }
+
+      print('EPUB parsed: ${chapters.length} chapters found');
       return chapters;
     } catch (e) {
       print('EPUB parsing error: $e');
@@ -40,55 +69,65 @@ class EpubParser {
   }
 
   bool _isValidChapter(epub.EpubChapter chapter) {
-    if (chapter.HtmlContent == null) return false;
-    if (chapter.HtmlContent!.isEmpty) return false;
-
-    // Игнорируем очень короткие главы (возможно, это метаданные)
-    final cleanContent = _cleanContent(chapter.HtmlContent!);
-    return cleanContent.length > 50;
+    return chapter.HtmlContent != null && chapter.HtmlContent!.isNotEmpty;
   }
 
-  String _cleanContent(String html) {
-    // Базовая очистка без удаления переносов
-    return html
+  String _extractTextFromHtml(String html) {
+    // Упрощенная очистка HTML для получения читаемого текста
+    String text = html
         .replaceAll(RegExp(r'<script[^>]*>.*?</script>', caseSensitive: false), '')
         .replaceAll(RegExp(r'<style[^>]*>.*?</style>', caseSensitive: false), '')
         .replaceAll(RegExp(r'<!--.*?-->', caseSensitive: false), '')
         .replaceAll(RegExp(r'<head>.*?</head>', caseSensitive: false), '')
         .replaceAll(RegExp(r'<meta[^>]*>', caseSensitive: false), '')
         .replaceAll(RegExp(r'<title>.*?</title>', caseSensitive: false), '')
+        .replaceAll(RegExp(r'<[^>]*>'), ' ') // Удаляем все оставшиеся теги
+        .replaceAll(RegExp(r'&nbsp;'), ' ')
+        .replaceAll(RegExp(r'&amp;'), '&')
+        .replaceAll(RegExp(r'&lt;'), '<')
+        .replaceAll(RegExp(r'&gt;'), '>')
+        .replaceAll(RegExp(r'&quot;'), '"')
         .replaceAll(RegExp(r'\s+'), ' ')
         .trim();
+
+    // Убираем слишком длинные пробелы и форматируем текст
+    text = text
+        .replaceAll(RegExp(r'\.\s+'), '.\n\n')
+        .replaceAll(RegExp(r'\?\s+'), '?\n\n')
+        .replaceAll(RegExp(r'!\s+'), '!\n\n')
+        .replaceAll(RegExp(r'\n\s*\n'), '\n\n');
+
+    return text;
   }
 
-  List<ChapterEntity> _createLargeSections(List<epub.EpubChapter> allChapters) {
-    final sections = <ChapterEntity>[];
-    final sectionSize = 5; // Объединяем по 5 глав в один раздел
-    int sectionIndex = 0;
+  Future<String> _extractAllContent(epub.EpubBook epubBook) async {
+    final buffer = StringBuffer();
 
-    for (int i = 0; i < allChapters.length; i += sectionSize) {
-      final endIndex = (i + sectionSize).clamp(0, allChapters.length);
-      final sectionChapters = allChapters.sublist(i, endIndex);
-
-      final contentBuffer = StringBuffer();
-      for (final chapter in sectionChapters) {
+    // Собираем контент из всех глав
+    if (epubBook.Chapters != null) {
+      for (final chapter in epubBook.Chapters!) {
         if (chapter.HtmlContent != null && chapter.HtmlContent!.isNotEmpty) {
-          contentBuffer.writeln(_cleanContent(chapter.HtmlContent!));
-          contentBuffer.writeln('\n\n');
+          final content = _extractTextFromHtml(chapter.HtmlContent!);
+          if (content.isNotEmpty) {
+            buffer.writeln('=== ${chapter.Title ?? "Без названия"} ===');
+            buffer.writeln(content);
+            buffer.writeln('\n\n');
+          }
         }
-      }
-
-      final content = contentBuffer.toString().trim();
-      if (content.isNotEmpty) {
-        sections.add(ChapterEntity(
-          title: 'Раздел ${sectionIndex + 1}',
-          content: content,
-          index: sectionIndex,
-        ));
-        sectionIndex++;
       }
     }
 
-    return sections;
+    // Добавляем контент из HTML файлов если глав нет
+    if (buffer.isEmpty && epubBook.Content?.Html != null) {
+      for (final htmlFile in epubBook.Content!.Html!.values) {
+        if (htmlFile.Content != null && htmlFile.Content!.isNotEmpty) {
+          final content = _extractTextFromHtml(htmlFile.Content!);
+          buffer.writeln(content);
+          buffer.writeln('\n\n');
+        }
+      }
+    }
+
+    return buffer.toString().trim();
   }
 }

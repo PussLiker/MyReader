@@ -138,52 +138,64 @@ class _AddBookScreenState extends ConsumerState<AddBookScreen> with SingleTicker
   }
 
   Future<void> _saveBook() async {
-    if (_formKey.currentState!.validate()) {
-      if (_filePath == null && !_isEditMode) {
-        setState(() {
-          _errorMessage = 'Выберите файл';
-        });
-        return;
-      }
-
-      final repo = ref.read(bookRepositoryProvider);
-      final addBook = AddBook(repo);
-
-      try {
-        if (_isEditMode) {
-          final book = BookEntity(
-            id: widget.book!.id,
-            title: _titleController.text,
-            author: _authorController.text,
-            path: _filePath ?? widget.book!.path,
-            format: _fileFormat ?? widget.book!.format,
-            coverPath: widget.book?.coverPath,
-            progress: widget.book?.progress ?? 0,
-            category: _categoryController.text.isEmpty ? null : _categoryController.text,
-          );
-          await repo.updateBook(book);
-        } else {
-          await addBook(
-            filePath: _filePath!,
-            title: _titleController.text,
-            author: _authorController.text,
-            category: _categoryController.text.isEmpty ? null : _categoryController.text,
-          );
-        }
-
-        // Просто возвращаем результат - обновлением займется LibraryScreen
-        if (mounted) {
-          Navigator.pop(context, {
-            'result': true,
-            'category': _categoryController.text.isEmpty ? null : _categoryController.text
-          });
-        }
-      } catch (e) {
-        setState(() {
-          _errorMessage = 'Ошибка сохранения книги: $e';
-        });
-      }
+    // Проверяем валидацию формы
+    if (!_formKey.currentState!.validate()) {
+      return;
     }
+
+    // Для новой книги проверяем наличие файла
+    if (_filePath == null && !_isEditMode) {
+      setState(() {
+        _errorMessage = 'Выберите файл';
+      });
+      return;
+    }
+
+    final repo = ref.read(bookRepositoryProvider);
+    final addBook = AddBook(repo);
+
+    try {
+      if (_isEditMode) {
+        final book = BookEntity(
+          id: widget.book!.id,
+          title: _titleController.text.trim(),
+          author: _authorController.text.trim(),
+          path: _filePath ?? widget.book!.path,
+          format: _fileFormat ?? widget.book!.format,
+          coverPath: widget.book?.coverPath,
+          progress: widget.book?.progress ?? 0,
+          category: _categoryController.text.trim().isEmpty ? null : _categoryController.text.trim(),
+        );
+        await repo.updateBook(book);
+      } else {
+        await addBook(
+          filePath: _filePath!,
+          title: _titleController.text.trim(),
+          author: _authorController.text.trim(),
+          category: _categoryController.text.trim().isEmpty ? null : _categoryController.text.trim(),
+        );
+      }
+
+      // Просто возвращаем результат - обновлением займется LibraryScreen
+      if (mounted) {
+        Navigator.pop(context, {
+          'result': true,
+          'category': _categoryController.text.trim().isEmpty ? null : _categoryController.text.trim()
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _errorMessage = 'Ошибка сохранения книги: $e';
+      });
+    }
+  }
+
+  // Валидатор для обязательных полей
+  String? _requiredValidator(String? value) {
+    if (value == null || value.trim().isEmpty) {
+      return 'Это поле обязательно для заполнения';
+    }
+    return null;
   }
 
   @override
@@ -203,7 +215,9 @@ class _AddBookScreenState extends ConsumerState<AddBookScreen> with SingleTicker
         backgroundColor: const Color(0xFFBCAAA4),
         title: Text(
           _isEditMode ? 'Редактировать книгу' : 'Добавить книгу',
-          style: const TextStyle(color: Color(0xFF4E342E)),
+          style: const TextStyle(
+            color: Color(0xFF4E342E),
+            fontWeight: FontWeight.w600,),
         ),
         iconTheme: const IconThemeData(color: Color(0xFF4E342E)),
       ),
@@ -229,7 +243,7 @@ class _AddBookScreenState extends ConsumerState<AddBookScreen> with SingleTicker
                   TextFormField(
                     controller: _titleController,
                     decoration: const InputDecoration(
-                      labelText: 'Название',
+                      labelText: 'Название *',
                       labelStyle: TextStyle(color: Color(0xFF4E342E)),
                       border: OutlineInputBorder(
                         borderSide: BorderSide(color: Color(0xFF7B5E57)),
@@ -242,18 +256,13 @@ class _AddBookScreenState extends ConsumerState<AddBookScreen> with SingleTicker
                       ),
                     ),
                     style: const TextStyle(color: Color(0xFF4E342E)),
-                    validator: (value) {
-                      if (value == null || value.isEmpty) {
-                        return 'Введите название';
-                      }
-                      return null;
-                    },
+                    validator: _requiredValidator,
                   ),
                   const SizedBox(height: 16),
                   TextFormField(
                     controller: _authorController,
                     decoration: const InputDecoration(
-                      labelText: 'Автор',
+                      labelText: 'Автор *',
                       labelStyle: TextStyle(color: Color(0xFF4E342E)),
                       border: OutlineInputBorder(
                         borderSide: BorderSide(color: Color(0xFF7B5E57)),
@@ -266,18 +275,13 @@ class _AddBookScreenState extends ConsumerState<AddBookScreen> with SingleTicker
                       ),
                     ),
                     style: const TextStyle(color: Color(0xFF4E342E)),
-                    validator: (value) {
-                      if (value == null || value.isEmpty) {
-                        return 'Введите автора';
-                      }
-                      return null;
-                    },
+                    validator: _requiredValidator,
                   ),
                   const SizedBox(height: 16),
                   TextFormField(
                     controller: _categoryController,
                     decoration: const InputDecoration(
-                      labelText: 'Категория',
+                      labelText: 'Категория *',
                       labelStyle: TextStyle(color: Color(0xFF4E342E)),
                       border: OutlineInputBorder(
                         borderSide: BorderSide(color: Color(0xFF7B5E57)),
@@ -290,7 +294,7 @@ class _AddBookScreenState extends ConsumerState<AddBookScreen> with SingleTicker
                       ),
                     ),
                     style: const TextStyle(color: Color(0xFF4E342E)),
-                    validator: (value) => null,
+                    validator: _requiredValidator,
                   ),
                   const SizedBox(height: 16),
                   if (!_isEditMode)
@@ -334,9 +338,25 @@ class _AddBookScreenState extends ConsumerState<AddBookScreen> with SingleTicker
                     AnimatedOpacity(
                       opacity: _errorMessage != null ? 1.0 : 0.0,
                       duration: const Duration(milliseconds: 500),
-                      child: Text(
-                        _errorMessage!,
-                        style: const TextStyle(color: Colors.red),
+                      child: Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.red[50],
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.red),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.error_outline, color: Colors.red),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                _errorMessage!,
+                                style: const TextStyle(color: Colors.red),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ],
@@ -354,6 +374,18 @@ class _AddBookScreenState extends ConsumerState<AddBookScreen> with SingleTicker
                       ),
                       minimumSize: const Size(double.infinity, 48),
                       elevation: 3,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 8.0),
+                    child: Text(
+                      '* - обязательные поля',
+                      style: TextStyle(
+                        color: Color(0xFF8D6E63),
+                        fontSize: 12,
+                        fontStyle: FontStyle.italic,
+                      ),
                     ),
                   ),
                 ],

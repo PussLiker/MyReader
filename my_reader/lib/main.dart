@@ -13,6 +13,7 @@ class MyReaderApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'My Reader',
+      debugShowCheckedModeBanner: false,
       theme: ThemeData(
         primaryColor: const Color(0xFFD7CCC8),
         scaffoldBackgroundColor: const Color(0xFFF5F5DC),

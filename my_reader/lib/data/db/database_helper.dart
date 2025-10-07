@@ -17,24 +17,29 @@ class DatabaseHelper {
   Future<Database> _initDatabase() async {
     final databasePath = await getDatabasesPath();
     final path = join(databasePath, 'books.db');
+
+    // Удаляем старую базу чтобы пересоздать с правильной структурой
+    await deleteDatabase(path);
+
     return await openDatabase(
       path,
-      version: 3,
+      version: 1,
       onCreate: (db, version) async {
         await _createTables(db);
-      },
-      onUpgrade: (db, oldVersion, newVersion) async {
-        if (oldVersion < 2) {
-          await _migrateToV2(db);
-        }
-        if (oldVersion < 3) {
-          await _migrateToV3(db);
-        }
       },
     );
   }
 
   Future<void> _createTables(Database db) async {
+    // Удаляем старые таблицы если есть
+    await db.execute('DROP TABLE IF EXISTS bookmarks');
+    await db.execute('DROP TABLE IF EXISTS quotes');
+    await db.execute('DROP TABLE IF EXISTS books');
+    await db.execute('DROP TABLE IF EXISTS authors');
+    await db.execute('DROP TABLE IF EXISTS formats');
+    await db.execute('DROP TABLE IF EXISTS categories');
+
+    // Создаем таблицы заново с правильной структурой
     await db.execute('''
       CREATE TABLE authors (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -42,18 +47,21 @@ class DatabaseHelper {
         last_name TEXT NOT NULL
       )
     ''');
+
     await db.execute('''
       CREATE TABLE formats (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL UNIQUE
       )
     ''');
+
     await db.execute('''
       CREATE TABLE categories (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL UNIQUE
       )
     ''');
+
     await db.execute('''
       CREATE TABLE books (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -69,83 +77,37 @@ class DatabaseHelper {
         FOREIGN KEY (category_id) REFERENCES categories(id) ON UPDATE CASCADE ON DELETE RESTRICT
       )
     ''');
+
+    // НОВАЯ СТРУКТУРА ДЛЯ ЗАКЛАДОК
     await db.execute('''
       CREATE TABLE bookmarks (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         book_id INTEGER NOT NULL,
-        position REAL NOT NULL,
+        chapter_index REAL NOT NULL,
+        char_offset INTEGER NOT NULL,
+        selected_text TEXT,
         note TEXT NOT NULL,
         FOREIGN KEY (book_id) REFERENCES books(id) ON UPDATE CASCADE ON DELETE RESTRICT
       )
     ''');
+
+    // НОВАЯ СТРУКТУРА ДЛЯ ЦИТАТ
     await db.execute('''
       CREATE TABLE quotes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         book_id INTEGER NOT NULL,
-        position REAL NOT NULL,
+        chapter_index REAL NOT NULL,
+        char_offset INTEGER NOT NULL,
         quote_text TEXT NOT NULL,
         comment TEXT,
         FOREIGN KEY (book_id) REFERENCES books(id) ON UPDATE CASCADE ON DELETE RESTRICT
       )
     ''');
 
+    // Добавляем базовые форматы
     await db.insert('formats', {'name': 'EPUB'});
     await db.insert('formats', {'name': 'FB2'});
     await db.insert('formats', {'name': 'TXT'});
-  }
-
-  Future<void> _migrateToV2(Database db) async {
-    await db.execute('''
-      ALTER TABLE books ADD COLUMN position REAL NOT NULL DEFAULT 0.0
-    ''');
-    await db.execute('''
-      ALTER TABLE bookmarks ADD COLUMN position_real REAL
-    ''');
-    await db.execute('''
-      UPDATE bookmarks SET position_real = CAST(position AS REAL)
-    ''');
-    await db.execute('''
-      ALTER TABLE bookmarks DROP COLUMN position
-    ''');
-    await db.execute('''
-      ALTER TABLE bookmarks RENAME COLUMN position_real TO position
-    ''');
-    await db.execute('''
-      ALTER TABLE quotes ADD COLUMN position_real REAL
-    ''');
-    await db.execute('''
-      UPDATE quotes SET position_real = CAST(position AS REAL)
-    ''');
-    await db.execute('''
-      ALTER TABLE quotes DROP COLUMN position
-    ''');
-    await db.execute('''
-      ALTER TABLE quotes RENAME COLUMN position_real TO position
-    ''');
-  }
-
-  Future<void> _migrateToV3(Database db) async {
-    await db.execute('''
-      ALTER TABLE bookmarks ADD COLUMN chapter_index REAL
-    ''');
-    await db.execute('''
-      ALTER TABLE bookmarks ADD COLUMN char_offset INTEGER
-    ''');
-    await db.execute('''
-      ALTER TABLE bookmarks ADD COLUMN selected_text TEXT
-    ''');
-    await db.execute('''
-      ALTER TABLE quotes ADD COLUMN chapter_index REAL
-    ''');
-    await db.execute('''
-      ALTER TABLE quotes ADD COLUMN char_offset INTEGER
-    ''');
-    await db.execute('''
-      UPDATE bookmarks SET chapter_index = position, char_offset = 0
-    ''');
-    await db.execute('''
-      UPDATE quotes SET chapter_index = position, char_offset = 0
-    ''');
   }
 
   Future<int> insertAuthor(String firstName, String lastName) async {
@@ -342,31 +304,71 @@ class DatabaseHelper {
     );
   }
 
-  Future<int> addBookmark(int bookId, double position, String note) async {
+  Future<int> addBookmarkWithPosition(int bookId, ReadingPosition position, String note) async {
     final db = await database;
     final id = await db.insert(
       'bookmarks',
       {
         'book_id': bookId,
-        'position': position,
+        'chapter_index': position.chapterIndex,
+        'char_offset': position.charOffset,
+        'selected_text': position.selectedText,
         'note': note,
       },
-      conflictAlgorithm: ConflictAlgorithm.replace,
     );
     return id;
   }
 
-  Future<List<Map<String, dynamic>>> getBookmarks(int bookId) async {
+  Future<int> addQuoteWithPosition(int bookId, ReadingPosition position, String quoteText, String? comment) async {
+    final db = await database;
+    final id = await db.insert(
+      'quotes',
+      {
+        'book_id': bookId,
+        'chapter_index': position.chapterIndex,
+        'char_offset': position.charOffset,
+        'quote_text': quoteText,
+        'comment': comment,
+      },
+    );
+    return id;
+  }
+
+  Future<List<ReadingPosition>> getBookmarksWithPosition(int bookId) async {
     final db = await database;
     final bookmarks = await db.query(
       'bookmarks',
       where: 'book_id = ?',
       whereArgs: [bookId],
     );
-    return bookmarks;
+
+    return bookmarks.map((bm) => ReadingPosition(
+      id: bm['id'] as int,
+      chapterIndex: bm['chapter_index'] as double,
+      charOffset: bm['char_offset'] as int,
+      selectedText: bm['selected_text'] as String?,
+      note: bm['note'] as String?,
+    )).toList();
   }
 
-  Future<void> deleteBookmark(int bookmarkId) async {
+  Future<List<ReadingPosition>> getQuotesWithPosition(int bookId) async {
+    final db = await database;
+    final quotes = await db.query(
+      'quotes',
+      where: 'book_id = ?',
+      whereArgs: [bookId],
+    );
+
+    return quotes.map((q) => ReadingPosition(
+      id: q['id'] as int,
+      chapterIndex: q['chapter_index'] as double,
+      charOffset: q['char_offset'] as int,
+      selectedText: q['quote_text'] as String?,
+      comment: q['comment'] as String?,
+    )).toList();
+  }
+
+  Future<void> deleteBookmarkById(int bookmarkId) async {
     final db = await database;
     await db.delete(
       'bookmarks',
@@ -375,38 +377,41 @@ class DatabaseHelper {
     );
   }
 
-  Future<int> addQuote(int bookId, double position, String quoteText, String? comment) async {
-    final db = await database;
-    final id = await db.insert(
-      'quotes',
-      {
-        'book_id': bookId,
-        'position': position,
-        'quote_text': quoteText,
-        'comment': comment,
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
-    return id;
-  }
-
-  Future<List<Map<String, dynamic>>> getQuotes(int bookId) async {
-    final db = await database;
-    final quotes = await db.query(
-      'quotes',
-      where: 'book_id = ?',
-      whereArgs: [bookId],
-    );
-    return quotes;
-  }
-
-  Future<void> deleteQuote(int quoteId) async {
+  Future<void> deleteQuoteById(int quoteId) async {
     final db = await database;
     await db.delete(
       'quotes',
       where: 'id = ?',
       whereArgs: [quoteId],
     );
+  }
+
+  Future<List<Map<String, dynamic>>> getBookmarksWithDetails([int? bookId]) async {
+    final db = await database;
+    final where = bookId != null && bookId > 0 ? 'book_id = ?' : '1=1';
+    final whereArgs = bookId != null && bookId > 0 ? [bookId] : [];
+
+    final bookmarks = await db.query(
+      'bookmarks',
+      where: where,
+      whereArgs: whereArgs,
+      orderBy: 'id DESC',
+    );
+    return bookmarks;
+  }
+
+  Future<List<Map<String, dynamic>>> getQuotesWithDetails([int? bookId]) async {
+    final db = await database;
+    final where = bookId != null && bookId > 0 ? 'book_id = ?' : '1=1';
+    final whereArgs = bookId != null && bookId > 0 ? [bookId] : [];
+
+    final quotes = await db.query(
+      'quotes',
+      where: where,
+      whereArgs: whereArgs,
+      orderBy: 'id DESC',
+    );
+    return quotes;
   }
 
   Future<List<String>> getCategories() async {
@@ -462,113 +467,7 @@ class DatabaseHelper {
     return null;
   }
 
-  Future<int> addBookmarkWithPosition(int bookId, ReadingPosition position, String note) async {
-    final db = await database;
-    final id = await db.insert(
-      'bookmarks',
-      {
-        'book_id': bookId,
-        'chapter_index': position.chapterIndex,
-        'char_offset': position.charOffset,
-        'selected_text': position.selectedText,
-        'note': note,
-      },
-    );
-    return id;
-  }
-
-  Future<int> addQuoteWithPosition(int bookId, ReadingPosition position, String quoteText, String? comment) async {
-    final db = await database;
-    final id = await db.insert(
-      'quotes',
-      {
-        'book_id': bookId,
-        'chapter_index': position.chapterIndex,
-        'char_offset': position.charOffset,
-        'quote_text': quoteText,
-        'comment': comment,
-      },
-    );
-    return id;
-  }
-
-  Future<List<ReadingPosition>> getBookmarksWithPosition(int bookId) async {
-    final db = await database;
-    final bookmarks = await db.query(
-      'bookmarks',
-      where: 'book_id = ?',
-      whereArgs: [bookId],
-    );
-
-    return bookmarks.map((bm) => ReadingPosition(
-      id: bm['id'] as int,
-      chapterIndex: (bm['chapter_index'] as num?)?.toDouble() ?? (bm['position'] as num).toDouble(),
-      charOffset: bm['char_offset'] as int? ?? 0,
-      selectedText: bm['selected_text'] as String?,
-      note: bm['note'] as String?,
-    )).toList();
-  }
-
-  Future<List<ReadingPosition>> getQuotesWithPosition(int bookId) async {
-    final db = await database;
-    final quotes = await db.query(
-      'quotes',
-      where: 'book_id = ?',
-      whereArgs: [bookId],
-    );
-
-    return quotes.map((q) => ReadingPosition(
-      id: q['id'] as int,
-      chapterIndex: (q['chapter_index'] as num?)?.toDouble() ?? (q['position'] as num).toDouble(),
-      charOffset: q['char_offset'] as int? ?? 0,
-      selectedText: q['quote_text'] as String?,
-      comment: q['comment'] as String?,
-    )).toList();
-  }
-
-  Future<void> deleteBookmarkById(int bookmarkId) async {
-    final db = await database;
-    await db.delete(
-      'bookmarks',
-      where: 'id = ?',
-      whereArgs: [bookmarkId],
-    );
-  }
-
-  Future<void> deleteQuoteById(int quoteId) async {
-    final db = await database;
-    await db.delete(
-      'quotes',
-      where: 'id = ?',
-      whereArgs: [quoteId],
-    );
-  }
-
-  Future<List<Map<String, dynamic>>> getBookmarksWithDetails([int? bookId]) async {
-    final db = await database;
-    final where = bookId != null && bookId > 0 ? 'book_id = ?' : '1=1';
-    final whereArgs = bookId != null && bookId > 0 ? [bookId] : [];
-
-    final bookmarks = await db.query(
-      'bookmarks',
-      where: where,
-      whereArgs: whereArgs,
-      orderBy: 'id DESC',
-    );
-    return bookmarks;
-  }
-
-  Future<List<Map<String, dynamic>>> getQuotesWithDetails([int? bookId]) async {
-    final db = await database;
-    final where = bookId != null && bookId > 0 ? 'book_id = ?' : '1=1';
-    final whereArgs = bookId != null && bookId > 0 ? [bookId] : [];
-
-    final quotes = await db.query(
-      'quotes',
-      where: where,
-      whereArgs: whereArgs,
-      orderBy: 'id DESC',
-    );
-    return quotes;
-  }
+// УДАЛЕНЫ СТАРЫЕ МЕТОДЫ:
+// _migrateToV2, _migrateToV3, _migrateToV4
+// addBookmark, addQuote, getBookmarks, getQuotes, deleteBookmark, deleteQuote
 }

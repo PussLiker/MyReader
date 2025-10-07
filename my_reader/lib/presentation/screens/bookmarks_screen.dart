@@ -33,17 +33,16 @@ class _BookmarksScreenState extends ConsumerState<BookmarksScreen> {
     if (selectedText != null) {
       String shareText = '"$selectedText" - ${book.author}. ${book.title}.';
 
-      // Добавляем комментарий если он есть
       if (note != null && note.isNotEmpty && note != 'Закладка') {
         shareText += '\n:: $note';
       }
 
       Share.share(shareText);
     } else if (note != null && note.isNotEmpty && note != 'Закладка') {
-      // Если нет выделенного текста, но есть комментарий
       Share.share('$note - ${book.author}. ${book.title}.');
     }
   }
+
   Future<void> _loadBookmarks() async {
     try {
       final allBookmarks = await DatabaseHelper.instance.getBookmarksWithDetails();
@@ -69,6 +68,13 @@ class _BookmarksScreenState extends ConsumerState<BookmarksScreen> {
           });
         }
       }
+
+      // Сортируем по названию книги для группировки
+      bookmarksWithBooks.sort((a, b) {
+        final bookA = a['book'] as BookEntity;
+        final bookB = b['book'] as BookEntity;
+        return bookA.title.compareTo(bookB.title);
+      });
 
       setState(() {
         _bookmarks = bookmarksWithBooks;
@@ -172,92 +178,125 @@ class _BookmarksScreenState extends ConsumerState<BookmarksScreen> {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 6.0),
       decoration: BoxDecoration(
-        color: const Color(0xFFBCAAA4),
+        color: const Color(0xFFF5F1EB),
         borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.1),
-            blurRadius: 4,
-            offset: const Offset(0, 2),
-          ),
-        ],
+        border: Border.all(color: const Color(0xFFD7CCC8)),
       ),
       child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-        leading: Container(
-          width: 40,
-          height: 40,
-          decoration: BoxDecoration(
-            color: const Color(0xFF8D6E63),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: const Icon(Icons.bookmark, color: Colors.white, size: 20),
-        ),
+        leading: const Icon(Icons.bookmark, color: Color(0xFF7B5E57)),
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (selectedText != null) ...[
+            if (selectedText != null)
               Text(
                 selectedText,
                 style: const TextStyle(
                   color: Color(0xFF4E342E),
-                  fontWeight: FontWeight.w600,
-                  fontSize: 15,
-                  height: 1.3,
+                  fontSize: 14,
+                  height: 1.4,
                 ),
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
               ),
-              const SizedBox(height: 6),
-            ],
+            const SizedBox(height: 4),
             Text(
               book.title,
               style: const TextStyle(
-                color: Color(0xFF5D4037),
-                fontSize: 13,
+                color: Color(0xFF6D4C41),
+                fontSize: 12,
                 fontWeight: FontWeight.w500,
               ),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
-            if (note != null && note.isNotEmpty) ...[
-              const SizedBox(height: 4),
-              Text(
-                note,
-                style: const TextStyle(
-                  color: Color(0xFF6D4C41),
-                  fontSize: 12,
-                  fontStyle: FontStyle.italic,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ],
           ],
         ),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // Кнопка поделиться
-            if (selectedText != null || (note != null && note.isNotEmpty && note != 'Закладка'))
-              IconButton(
-                icon: const Icon(Icons.share, color: Color(0xFF5D4037), size: 18),
-                onPressed: () => _shareBookmark(bookmarkData),
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(),
-                tooltip: 'Поделиться',
+        subtitle: note != null && note.isNotEmpty && note != 'Закладка'
+            ? Text(
+          note,
+          style: const TextStyle(
+            color: Color(0xFF8D6E63),
+            fontSize: 12,
+            fontStyle: FontStyle.italic,
+          ),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        )
+            : null,
+        trailing: PopupMenuButton<String>(
+          icon: const Icon(Icons.more_vert, color: Color(0xFF7B5E57), size: 20),
+          onSelected: (value) {
+            if (value == 'delete') {
+              _deleteBookmark(bookmarkData);
+            } else if (value == 'share') {
+              _shareBookmark(bookmarkData);
+            }
+          },
+          itemBuilder: (context) => [
+            const PopupMenuItem(
+              value: 'share',
+              child: Row(
+                children: [
+                  Icon(Icons.share, size: 18, color: Color(0xFF7B5E57)),
+                  SizedBox(width: 8),
+                  Text('Поделиться'),
+                ],
               ),
-            // Кнопка удаления
-            IconButton(
-              icon: const Icon(Icons.delete_outline, color: Color(0xFF5D4037), size: 20),
-              onPressed: () => _deleteBookmark(bookmarkData),
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(),
+            ),
+            const PopupMenuItem(
+              value: 'delete',
+              child: Row(
+                children: [
+                  Icon(Icons.delete, size: 18, color: Color(0xFF7B5E57)),
+                  SizedBox(width: 8),
+                  Text('Удалить'),
+                ],
+              ),
             ),
           ],
         ),
         onTap: () => _goToBookmark(bookmarkData),
       ),
+    );
+  }
+
+  Widget _buildBookGroup(String bookTitle, List<Map<String, dynamic>> bookmarks) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+          child: Text(
+            bookTitle,
+            style: const TextStyle(
+              color: Color(0xFF4E342E),
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
+        ...bookmarks.map(_buildBookmarkItem),
+      ],
+    );
+  }
+
+  Widget _buildGroupedBookmarks() {
+    final groupedBookmarks = <String, List<Map<String, dynamic>>>{};
+
+    for (final bookmarkData in _bookmarks) {
+      final book = bookmarkData['book'] as BookEntity;
+      final bookTitle = book.title;
+
+      if (!groupedBookmarks.containsKey(bookTitle)) {
+        groupedBookmarks[bookTitle] = [];
+      }
+      groupedBookmarks[bookTitle]!.add(bookmarkData);
+    }
+
+    return ListView(
+      children: groupedBookmarks.entries.map((entry) {
+        return _buildBookGroup(entry.key, entry.value);
+      }).toList(),
     );
   }
 
@@ -308,7 +347,7 @@ class _BookmarksScreenState extends ConsumerState<BookmarksScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFEDE7D9),
+      backgroundColor: const Color(0xFFF8F4F0),
       appBar: AppBar(
         backgroundColor: const Color(0xFFBCAAA4),
         title: const Text(
@@ -326,15 +365,9 @@ class _BookmarksScreenState extends ConsumerState<BookmarksScreen> {
           ? _buildEmpty()
           : RefreshIndicator(
         onRefresh: _loadBookmarks,
-        backgroundColor: const Color(0xFFEDE7D9),
+        backgroundColor: const Color(0xFFF8F4F0),
         color: const Color(0xFF8D6E63),
-        child: ListView.builder(
-          padding: const EdgeInsets.symmetric(vertical: 16.0),
-          itemCount: _bookmarks.length,
-          itemBuilder: (context, index) {
-            return _buildBookmarkItem(_bookmarks[index]);
-          },
-        ),
+        child: _buildGroupedBookmarks(),
       ),
     );
   }

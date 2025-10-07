@@ -50,6 +50,13 @@ class _QuotesScreenState extends ConsumerState<QuotesScreen> {
         }
       }
 
+      // Сортируем по названию книги для группировки
+      quotesWithBooks.sort((a, b) {
+        final bookA = a['book'] as BookEntity;
+        final bookB = b['book'] as BookEntity;
+        return bookA.title.compareTo(bookB.title);
+      });
+
       setState(() {
         _quotes = quotesWithBooks;
         _isLoading = false;
@@ -96,7 +103,6 @@ class _QuotesScreenState extends ConsumerState<QuotesScreen> {
     if (quoteText != null) {
       String shareText = '"$quoteText" - ${book.author}. ${book.title}.';
 
-      // Добавляем комментарий если он есть
       if (comment != null && comment.isNotEmpty) {
         shareText += '\n:: $comment';
       }
@@ -104,7 +110,6 @@ class _QuotesScreenState extends ConsumerState<QuotesScreen> {
       Share.share(shareText);
     }
   }
-
 
   Future<void> _deleteQuote(Map<String, dynamic> quoteData) async {
     final quote = quoteData['quote'];
@@ -182,134 +187,123 @@ class _QuotesScreenState extends ConsumerState<QuotesScreen> {
       decoration: BoxDecoration(
         color: const Color(0xFFF5F1EB),
         borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 3,
-            offset: const Offset(0, 1),
-          ),
-        ],
-        border: Border.all(
-          color: const Color(0xFFD7CCC8),
-          width: 1,
-        ),
+        border: Border.all(color: const Color(0xFFD7CCC8)),
       ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(12),
-          onTap: () => _goToQuote(quoteData),
-          child: Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Icon(
-                      Icons.format_quote,
-                      color: const Color(0xFF8D6E63).withOpacity(0.7),
-                      size: 16,
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        book.title,
-                        style: const TextStyle(
-                          color: Color(0xFF6D4C41),
-                          fontSize: 12,
-                          fontWeight: FontWeight.w500,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
+      child: ListTile(
+        leading: const Icon(Icons.format_quote, color: Color(0xFF7B5E57)),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (quoteText != null)
+              Text(
+                quoteText,
+                style: const TextStyle(
+                  color: Color(0xFF4E342E),
+                  fontSize: 14,
+                  height: 1.4,
+                  fontStyle: FontStyle.italic,
                 ),
-                const SizedBox(height: 12),
-                if (quoteText != null)
-                  Text(
-                    quoteText,
-                    style: const TextStyle(
-                      color: Color(0xFF4E342E),
-                      fontSize: 14,
-                      height: 1.4,
-                      fontStyle: FontStyle.italic,
-                    ),
-                    maxLines: 3,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                if (comment != null && comment.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFE8D8C7),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Text(
-                      comment,
-                      style: const TextStyle(
-                        color: Color(0xFF5D4037),
-                        fontSize: 12,
-                        height: 1.3,
-                      ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            const SizedBox(height: 4),
+            Text(
+              book.title,
+              style: const TextStyle(
+                color: Color(0xFF6D4C41),
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+        ),
+        subtitle: comment != null && comment.isNotEmpty
+            ? Text(
+          comment,
+          style: const TextStyle(
+            color: Color(0xFF8D6E63),
+            fontSize: 12,
+          ),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        )
+            : null,
+        trailing: PopupMenuButton<String>(
+          icon: const Icon(Icons.more_vert, color: Color(0xFF7B5E57), size: 20),
+          onSelected: (value) {
+            if (value == 'delete') {
+              _deleteQuote(quoteData);
+            } else if (value == 'share') {
+              _shareQuote(quoteData);
+            }
+          },
+          itemBuilder: (context) => [
+            const PopupMenuItem(
+              value: 'share',
+              child: Row(
+                children: [
+                  Icon(Icons.share, size: 18, color: Color(0xFF7B5E57)),
+                  SizedBox(width: 8),
+                  Text('Поделиться'),
                 ],
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        book.author,
-                        style: const TextStyle(
-                          color: Color(0xFF8D6E63),
-                          fontSize: 11,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    if (quoteText != null)
-                      IconButton(
-                        icon: Icon(
-                          Icons.share,
-                          color: const Color(0xFF8D6E63).withOpacity(0.7),
-                          size: 18,
-                        ),
-                        onPressed: () => _shareQuote(quoteData),
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(
-                          minWidth: 30,
-                          minHeight: 30,
-                        ),
-                        tooltip: 'Поделиться',
-                      ),
-                    IconButton(
-                      icon: Icon(
-                        Icons.delete_outline,
-                        color: const Color(0xFF8D6E63).withOpacity(0.7),
-                        size: 18,
-                      ),
-                      onPressed: () => _deleteQuote(quoteData),
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(
-                        minWidth: 30,
-                        minHeight: 30,
-                      ),
-                      tooltip: 'Удалить',
-                    ),
-                  ],
-                ),
-              ],
+              ),
+            ),
+            const PopupMenuItem(
+              value: 'delete',
+              child: Row(
+                children: [
+                  Icon(Icons.delete, size: 18, color: Color(0xFF7B5E57)),
+                  SizedBox(width: 8),
+                  Text('Удалить'),
+                ],
+              ),
+            ),
+          ],
+        ),
+        onTap: () => _goToQuote(quoteData),
+      ),
+    );
+  }
+
+  Widget _buildBookGroup(String bookTitle, List<Map<String, dynamic>> quotes) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+          child: Text(
+            bookTitle,
+            style: const TextStyle(
+              color: Color(0xFF4E342E),
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
             ),
           ),
         ),
-      ),
+        ...quotes.map(_buildQuoteItem),
+      ],
+    );
+  }
+
+  Widget _buildGroupedQuotes() {
+    final groupedQuotes = <String, List<Map<String, dynamic>>>{};
+
+    for (final quoteData in _quotes) {
+      final book = quoteData['book'] as BookEntity;
+      final bookTitle = book.title;
+
+      if (!groupedQuotes.containsKey(bookTitle)) {
+        groupedQuotes[bookTitle] = [];
+      }
+      groupedQuotes[bookTitle]!.add(quoteData);
+    }
+
+    return ListView(
+      children: groupedQuotes.entries.map((entry) {
+        return _buildBookGroup(entry.key, entry.value);
+      }).toList(),
     );
   }
 
@@ -370,22 +364,10 @@ class _QuotesScreenState extends ConsumerState<QuotesScreen> {
           'Мои цитаты',
           style: TextStyle(
             color: Color(0xFF4E342E),
-            fontSize: 18,
+
             fontWeight: FontWeight.w600,
           ),
         ),
-        actions: [
-          if (_quotes.isNotEmpty)
-            IconButton(
-              icon: const Icon(
-                Icons.refresh,
-                color: Color(0xFF4E342E),
-                size: 20,
-              ),
-              onPressed: _loadQuotes,
-              tooltip: 'Обновить',
-            ),
-        ],
       ),
       body: _isLoading
           ? _buildLoading()
@@ -395,13 +377,7 @@ class _QuotesScreenState extends ConsumerState<QuotesScreen> {
         onRefresh: _loadQuotes,
         backgroundColor: const Color(0xFFF8F4F0),
         color: const Color(0xFF8D6E63),
-        child: ListView.builder(
-          padding: const EdgeInsets.symmetric(vertical: 12.0),
-          itemCount: _quotes.length,
-          itemBuilder: (context, index) {
-            return _buildQuoteItem(_quotes[index]);
-          },
-        ),
+        child: _buildGroupedQuotes(),
       ),
     );
   }

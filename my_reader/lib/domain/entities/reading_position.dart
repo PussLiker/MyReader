@@ -1,10 +1,10 @@
 class ReadingPosition {
-  final int? id; // ID закладки или цитаты
+  final int? id;
   final double chapterIndex;
   final int charOffset;
   final String? selectedText;
-  final String? note; // Для закладок
-  final String? comment; // Для цитат
+  final String? note;
+  final String? comment;
 
   ReadingPosition({
     this.id,
