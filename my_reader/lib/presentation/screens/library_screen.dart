@@ -34,24 +34,16 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
       final repo = ref.read(bookRepositoryProvider);
       final allCategories = await repo.getCategories();
 
-      // Фильтруем категории, оставляя только те, в которых есть книги
-      final nonEmptyCategories = <String>[];
-      for (final category in allCategories) {
-        final books = await repo.getBooks(category);
-        if (books.isNotEmpty) {
-          nonEmptyCategories.add(category);
-        }
-      }
-
+      // УБИРАЕМ фильтрацию - показываем ВСЕ категории
       setState(() {
         _categories
           ..clear()
-          ..addAll(['Все категории', ...nonEmptyCategories]);
+          ..addAll(['Все категории', ...allCategories]);
 
         // Проверяем, существует ли выбранная категория в обновленном списке
         if (_selectedCategory != null &&
             _selectedCategory != 'Все категории' &&
-            !nonEmptyCategories.contains(_selectedCategory)) {
+            !allCategories.contains(_selectedCategory)) {
           _selectedCategory = null;
         }
       });

@@ -18,8 +18,7 @@ class DatabaseHelper {
     final databasePath = await getDatabasesPath();
     final path = join(databasePath, 'books.db');
 
-    // Удаляем старую базу чтобы пересоздать с правильной структурой
-    await deleteDatabase(path);
+
 
     return await openDatabase(
       path,
@@ -417,12 +416,15 @@ class DatabaseHelper {
   Future<List<String>> getCategories() async {
     final db = await database;
     final maps = await db.rawQuery('''
-      SELECT DISTINCT categories.name 
-      FROM categories 
-      JOIN books ON categories.id = books.category_id 
-      WHERE books.category_id IS NOT NULL
-    ''');
-    final categories = List.generate(maps.length, (i) => maps[i]['name'] as String);
+    SELECT DISTINCT categories.name 
+    FROM categories 
+    JOIN books ON categories.id = books.category_id 
+    WHERE books.category_id IS NOT NULL
+    ORDER BY categories.name
+  ''');
+
+    final categories = maps.map((map) => map['name'] as String).toList();
+    print('DEBUG: Found ${categories.length} categories: $categories'); // Для отладки
     return categories;
   }
 
@@ -467,7 +469,4 @@ class DatabaseHelper {
     return null;
   }
 
-// УДАЛЕНЫ СТАРЫЕ МЕТОДЫ:
-// _migrateToV2, _migrateToV3, _migrateToV4
-// addBookmark, addQuote, getBookmarks, getQuotes, deleteBookmark, deleteQuote
 }

@@ -30,17 +30,24 @@ class _BookmarksScreenState extends ConsumerState<BookmarksScreen> {
     final selectedText = bookmark['selected_text'] as String?;
     final note = bookmark['note'] as String?;
 
+    final chapterIndex = (bookmark['chapter_index'] as num?)?.toDouble() ?? 0.0;
+    final currentChapter = chapterIndex.floor() + 1;
+
+    String shareText = '📖 Чтение: "${book.title}"\n';
+    shareText += 'Глава $currentChapter\n';
+    shareText += '${book.author}\n\n';
+
     if (selectedText != null) {
-      String shareText = '"$selectedText" - ${book.author}. ${book.title}.';
-
-      if (note != null && note.isNotEmpty && note != 'Закладка') {
-        shareText += '\n:: $note';
-      }
-
-      Share.share(shareText);
-    } else if (note != null && note.isNotEmpty && note != 'Закладка') {
-      Share.share('$note - ${book.author}. ${book.title}.');
+      shareText += '"$selectedText"\n\n';
     }
+
+    if (note != null && note.isNotEmpty && note != 'Закладка') {
+      shareText += '$note\n\n';
+    }
+
+    shareText += '#книги #чтение';
+
+    Share.share(shareText);
   }
 
   Future<void> _loadBookmarks() async {

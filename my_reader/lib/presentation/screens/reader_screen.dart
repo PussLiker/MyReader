@@ -1,15 +1,13 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:flutter_html/flutter_html.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:my_reader/data/db/database_helper.dart';
 import 'package:my_reader/domain/entities/book_entity.dart';
 import 'package:my_reader/domain/entities/chapter_entity.dart';
 import 'package:my_reader/domain/entities/reading_position.dart';
-import 'package:my_reader/data/parsers/epub_parser.dart';
-import 'package:my_reader/data/parsers/fb2_parser.dart';
-import 'package:my_reader/data/parsers/txt_parser.dart';
+import 'package:my_reader/domain/parsers/txt_parser.dart';
 import 'package:share_plus/share_plus.dart';
+import '../../domain/parsers/epub_parser.dart';
+import '../../domain/parsers/fb2_parser.dart';
 
 class ReaderScreen extends ConsumerStatefulWidget {
   final BookEntity book;
@@ -559,7 +557,17 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   }
 
   void _shareQuote(String text) {
-    final shareText = '"$text" - ${widget.book.author}. ${widget.book.title}.';
+    final shareText = '''
+      Цитата из книги "${widget.book.title}"
+      
+      "$text"
+      
+      Автор: ${widget.book.author}
+      Источник: ${widget.book.title}
+      
+      #цитата #чтение #книги #литература
+        '''.trim();
+
     Share.share(shareText);
   }
 
