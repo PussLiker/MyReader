@@ -1,3 +1,5 @@
+import 'dart:async';
+import '../widgets/selection_toolbar.dart';
 import 'package:flutter/material.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:my_reader/data/db/database_helper.dart';
@@ -8,6 +10,7 @@ import 'package:my_reader/domain/parsers/txt_parser.dart';
 import 'package:share_plus/share_plus.dart';
 import '../../domain/parsers/epub_parser.dart';
 import '../../domain/parsers/fb2_parser.dart';
+import '../../domain/use_cases/text_transformer.dart';
 
 class ReaderScreen extends ConsumerStatefulWidget {
   final BookEntity book;
@@ -30,6 +33,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   TextSelection _selection = const TextSelection.collapsed(offset: -1);
   bool _isTextSelected = false;
   bool _showSelectionToolbar = false;
+  Map<int, List<ReadingPosition>> _indexedMarks = {};
+  Timer? _savePositionTimer;
 
   @override
   void initState() {
@@ -96,12 +101,29 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
       final bookmarks = await DatabaseHelper.instance.getBookmarksWithPosition(widget.book.id);
       final quotes = await DatabaseHelper.instance.getQuotesWithPosition(widget.book.id);
 
+      final allMarks = [...bookmarks, ...quotes];
+      final Map<int, List<ReadingPosition>> newIndexedMarks = {};
+
+      for (var mark in allMarks) {
+        final chIdx = mark.chapterIndex.floor();
+        if (!newIndexedMarks.containsKey(chIdx)) {
+          newIndexedMarks[chIdx] = [];
+        }
+        newIndexedMarks[chIdx]!.add(mark);
+      }
+
+      // КРИТИЧЕСКИ ВАЖНО: Сортируем отметки внутри каждой главы заранее!
+      for (var list in newIndexedMarks.values) {
+        list.sort((a, b) => a.charOffset.compareTo(b.charOffset));
+      }
+
       setState(() {
         _bookmarks = bookmarks;
         _quotes = quotes;
+        _indexedMarks = newIndexedMarks;
       });
     } catch (e) {
-      print('Error loading bookmarks and quotes: $e');
+      print('Error loading marks: $e');
     }
   }
 
@@ -112,26 +134,39 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     return _chapters[_currentChapterIndex.floor()];
   }
 
-  Future<void> _savePosition() async {
-    try {
-      await DatabaseHelper.instance.updatePosition(widget.book.id, _currentChapterIndex);
-    } catch (e) {
-      print('Error saving position: $e');
-    }
+  void _savePosition() {
+    // Отменяем предыдущий таймер, если он еще не сработал
+    _savePositionTimer?.cancel();
+
+    // Запускаем новый таймер на 1 секунду
+    _savePositionTimer = Timer(const Duration(seconds: 1), () async {
+      try {
+        await DatabaseHelper.instance.updatePosition(widget.book.id, _currentChapterIndex);
+        print('Позиция сохранена: $_currentChapterIndex');
+      } catch (e) {
+        print('Ошибка сохранения позиции: $e');
+      }
+    });
   }
 
   void _goToPosition(double chapterIndex, [int charOffset = 0]) {
-    if (chapterIndex < 0 || chapterIndex >= _chapters.length) return;
+    // Защита от выхода за пределы списка глав
+    if (_chapters.isEmpty) return;
+
+    final targetIdx = chapterIndex.clamp(0.0, _chapters.length - 1.0);
 
     setState(() {
-      _currentChapterIndex = chapterIndex;
+      _currentChapterIndex = targetIdx;
       _currentCharOffset = charOffset;
       _isTextSelected = false;
       _showSelectionToolbar = false;
     });
 
     _savePosition();
-    _scrollController.jumpTo(0);
+
+    if (_scrollController.hasClients) {
+      _scrollController.jumpTo(0);
+    }
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _scrollToCharOffset(charOffset);
@@ -993,35 +1028,58 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   }
 
   Widget _buildEpubContent(ChapterEntity chapter) {
-    return Stack(
-      children: [
-        SingleChildScrollView(
-          controller: _scrollController,
-          padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 16.0),
-          child: Column(
+    return LayoutBuilder(
+        builder: (context, constraints) {
+          return Stack(
             children: [
-              // Заголовок главы
-              Container(
-                padding: const EdgeInsets.only(bottom: 24.0),
-                child: Text(
-                  chapter.title,
-                  style: const TextStyle(
-                    fontSize: 24.0,
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFF4E342E),
+              SizedBox(
+                width: constraints.maxWidth,
+                height: constraints.maxHeight,
+                child: SingleChildScrollView(
+                  controller: _scrollController,
+                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 80),
+                  child: Column( // Теперь это внутри SizedBox, всё будет ок
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Center(
+                        child: Text(
+                          chapter.title,
+                          style: const TextStyle(
+                            fontSize: 24.0,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF4E342E),
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      _buildSelectableEpubContent(chapter.content),
+                    ],
                   ),
-                  textAlign: TextAlign.center,
                 ),
               ),
-              // Текст главы с возможностью выделения
-              _buildSelectableEpubContent(chapter.content),
+              if (_showSelectionToolbar && _isTextSelected)
+                SelectionToolbar(
+                  onAddBookmark: _addBookmarkAtSelection,
+                  onSaveQuote: _saveQuoteAtSelection,
+                  onShare: () {
+                    // Логика получения текста для отправки
+                    final selectedText = _currentChapter!.content.substring(
+                      _selection.start,
+                      _selection.end,
+                    ).trim();
+                    _shareQuote(selectedText);
+                  },
+                  onClose: () {
+                    setState(() {
+                      _showSelectionToolbar = false;
+                      _isTextSelected = false;
+                    });
+                  },
+                ),
             ],
-          ),
-        ),
-        if (_showSelectionToolbar && _isTextSelected)
-          _buildSelectionToolbar(),
-      ],
-    );
+          );
+        });
   }
 
   Widget _buildSelectableEpubContent(String content) {
@@ -1043,149 +1101,68 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   }
 
   Widget _buildTextContent(ChapterEntity chapter) {
-    final contentPadding = const EdgeInsets.symmetric(horizontal: 20.0, vertical: 16.0);
-
-    return Stack(
-      children: [
-        SingleChildScrollView(
-          controller: _scrollController,
-          padding: contentPadding,
-          child: SelectableText.rich(
-            _buildTextWithHighlights(chapter.content),
-            style: const TextStyle(
-              fontSize: 18.0,
-              height: 1.6,
-              color: Color(0xFF4E342E),
+    // Используем LayoutBuilder, чтобы точно знать доступную высоту
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return Stack(
+          children: [
+            // Ограничиваем область прокрутки размерами экрана
+            SizedBox(
+              width: constraints.maxWidth,
+              height: constraints.maxHeight,
+              child: SingleChildScrollView(
+                controller: _scrollController,
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 80), // Нижний отступ под Toolbar
+                child: RepaintBoundary(
+                  child: SelectableText.rich(
+                    _buildTextWithHighlights(chapter.content),
+                    style: const TextStyle(
+                      fontSize: 18.0,
+                      height: 1.6,
+                      color: Color(0xFF4E342E),
+                    ),
+                    onSelectionChanged: (selection, cause) {
+                      setState(() {
+                        _selection = selection;
+                        _isTextSelected = selection.isValid && selection.start != selection.end;
+                        _showSelectionToolbar = _isTextSelected;
+                      });
+                    },
+                  ),
+                ),
+              ),
             ),
-            onSelectionChanged: (selection, cause) {
-              setState(() {
-                _selection = selection;
-                _isTextSelected = selection.isValid && selection.start != selection.end;
-                _showSelectionToolbar = _isTextSelected;
-              });
-            },
-          ),
-        ),
-        if (_showSelectionToolbar && _isTextSelected)
-          _buildSelectionToolbar(),
-      ],
+            if (_showSelectionToolbar && _isTextSelected)
+              SelectionToolbar(
+                onAddBookmark: _addBookmarkAtSelection,
+                onSaveQuote: _saveQuoteAtSelection,
+                onShare: () {
+                  final selectedText = _currentChapter!.content.substring(
+                    _selection.start,
+                    _selection.end,
+                  ).trim();
+                  _shareQuote(selectedText);
+                },
+                onClose: () => setState(() {
+                  _showSelectionToolbar = false;
+                  _isTextSelected = false;
+                }),
+              ),
+          ],
+        );
+      },
     );
   }
 
   TextSpan _buildTextWithHighlights(String text) {
-    final spans = <TextSpan>[];
-    int currentPosition = 0;
+    // Просто берем уже готовый, отсортированный список для текущей главы из кэша
+    final currentChapterMarks = _indexedMarks[_currentChapterIndex.floor()] ?? [];
 
-    final chapterBookmarks = _bookmarks.where((bm) =>
-    bm.chapterIndex.floor() == _currentChapterIndex.floor()
-    ).toList();
-
-    final chapterQuotes = _quotes.where((q) =>
-    q.chapterIndex.floor() == _currentChapterIndex.floor()
-    ).toList();
-
-    // Объединяем и сортируем все позиции
-    final allPositions = <ReadingPosition>[];
-    allPositions.addAll(chapterBookmarks);
-    allPositions.addAll(chapterQuotes);
-    allPositions.sort((a, b) => a.charOffset.compareTo(b.charOffset));
-
-    for (final position in allPositions) {
-      if (position.charOffset > currentPosition) {
-        spans.add(TextSpan(
-          text: text.substring(currentPosition, position.charOffset),
-          style: const TextStyle(
-            fontSize: 18.0,
-            height: 1.6,
-            color: Color(0xFF4E342E),
-          ),
-        ));
-      }
-
-      final selectedText = position.selectedText ?? '';
-      final textEnd = position.charOffset + selectedText.length;
-      if (textEnd <= text.length) {
-        spans.add(TextSpan(
-          text: text.substring(position.charOffset, textEnd),
-          style: const TextStyle(
-            fontSize: 18.0,
-            height: 1.6,
-            color: Color(0xFF4E342E),
-            backgroundColor: Color(0xFFFFF8E1),
-            fontStyle: FontStyle.italic,
-          ),
-        ));
-      }
-
-      currentPosition = textEnd;
-    }
-
-    if (currentPosition < text.length) {
-      spans.add(TextSpan(
-        text: text.substring(currentPosition),
-        style: const TextStyle(
-          fontSize: 18.0,
-          height: 1.6,
-          color: Color(0xFF4E342E),
-        ),
-      ));
-    }
-
-    return TextSpan(children: spans);
+    // Делегируем работу сервису
+    return TextTransformer.buildHighlightedSpan(text, currentChapterMarks);
   }
 
-  Widget _buildSelectionToolbar() {
-    return Positioned(
-      bottom: 80,
-      left: 20,
-      right: 20,
-      child: Card(
-        color: const Color(0xFFBCAAA4),
-        elevation: 4,
-        child: Padding(
-          padding: const EdgeInsets.all(8.0),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: [
-              IconButton(
-                icon: const Icon(Icons.bookmark_add, color: Color(0xFF4E342E)),
-                onPressed: _addBookmarkAtSelection,
-                tooltip: 'Добавить закладку',
-              ),
-              IconButton(
-                icon: const Icon(Icons.format_quote, color: Color(0xFF4E342E)),
-                onPressed: _saveQuoteAtSelection,
-                tooltip: 'Сохранить цитату',
-              ),
-              IconButton(
-                icon: const Icon(Icons.share, color: Color(0xFF4E342E)),
-                onPressed: () {
-                  if (_selection.isValid && _selection.start != _selection.end) {
-                    final selectedText = _currentChapter!.content.substring(
-                      _selection.start,
-                      _selection.end,
-                    ).trim();
-                    _shareQuote(selectedText);
-                  }
-                },
-                tooltip: 'Поделиться',
-              ),
-              IconButton(
-                icon: const Icon(Icons.close, color: Color(0xFF4E342E)),
-                onPressed: () {
-                  setState(() {
-                    _showSelectionToolbar = false;
-                    _isTextSelected = false;
-                  });
-                },
-                tooltip: 'Закрыть',
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
+
 
   Widget _buildContent() {
     if (_isLoading) return _buildLoading();
@@ -1247,52 +1224,72 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
             });
           }
         },
-        child: _buildContent(),
+        child: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 400),
+          // Добавляем этот параметр, чтобы дочерний виджет занимал всё пространство
+          layoutBuilder: (Widget? currentChild, List<Widget> previousChildren) {
+            return SizedBox.expand(
+              child: Stack(
+                children: [
+                  ...previousChildren,
+                  if (currentChild != null) currentChild,
+                ],
+              ),
+            );
+          },
+          child: KeyedSubtree(
+            // Ключ важен для работы AnimatedSwitcher
+            key: ValueKey<double>(_currentChapterIndex),
+            child: _buildContent(),
+          ),
+        ),
       ),
       bottomNavigationBar: BottomAppBar(
         color: const Color(0xFFBCAAA4),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              IconButton(
-                onPressed: _currentChapterIndex > 0 ? _previousChapter : null,
-                icon: const Icon(Icons.arrow_back, color: Color(0xFF7B5E57)),
-                tooltip: 'Предыдущая глава',
-              ),
-              Expanded(
+        height: 70, // Фиксированная высота для стабильности
+        child: Row(
+          children: [
+            IconButton(
+              onPressed: _currentChapterIndex > 0 ? _previousChapter : null,
+              icon: const Icon(Icons.arrow_back, color: Color(0xFF7B5E57)),
+            ),
+            Expanded(
+              child: InkWell(
+                onTap: _showChaptersDialog,
                 child: Column(
-                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  mainAxisSize: MainAxisSize.min, 
                   children: [
-                    Text(
-                      _currentChapter?.title ?? 'Глава ${_currentChapterIndex.floor() + 1}',
-                      style: const TextStyle(
-                        color: Color(0xFF4E342E),
-                        fontSize: 12,
+                    if (_currentChapter != null) // Защита от null
+                      Text(
+                        _currentChapter!.title,
+                        style: const TextStyle(color: Color(0xFF4E342E), fontSize: 11),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
                       ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      textAlign: TextAlign.center,
-                    ),
-                    Text(
-                      '${_currentChapterIndex.floor() + 1} / ${_chapters.length}',
-                      style: const TextStyle(
-                        color: Color(0xFF4E342E),
-                        fontSize: 14,
-                        fontWeight: FontWeight.bold,
+                    const SizedBox(height: 4),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(10),
+                      child: LinearProgressIndicator(
+                        // Добавляем проверку на пустой список глав, чтобы не делить на 0
+                        value: _chapters.isNotEmpty
+                            ? (_currentChapterIndex + 1) / _chapters.length
+                            : 0,
+                        backgroundColor: const Color(0xFFD7CCC8),
+                        valueColor: const AlwaysStoppedAnimation(Color(0xFF7B5E57)),
+                        minHeight: 6,
                       ),
                     ),
                   ],
                 ),
               ),
-              IconButton(
-                onPressed: _currentChapterIndex < _chapters.length - 1 ? _nextChapter : null,
-                icon: const Icon(Icons.arrow_forward, color: Color(0xFF7B5E57)),
-                tooltip: 'Следующая глава',
-              ),
-            ],
-          ),
+            ),
+            IconButton(
+              onPressed: _currentChapterIndex < _chapters.length - 1 ? _nextChapter : null,
+              icon: const Icon(Icons.arrow_forward, color: Color(0xFF7B5E57)),
+            ),
+          ],
         ),
       ),
     );
@@ -1300,6 +1297,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
 
   @override
   void dispose() {
+    _savePositionTimer?.cancel(); // Останавливаем таймер
     _scrollController.dispose();
     super.dispose();
   }

@@ -365,7 +365,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
         children: [
           TextField(
             controller: _searchController,
-            focusNode: _searchFocusNode, // ДОБАВИТЬ ЭТУ СТРОКУ
+            focusNode: _searchFocusNode,
             decoration: const InputDecoration(
               labelText: 'Поиск по названию',
               labelStyle: TextStyle(color: Color(0xFF4E342E)),
