@@ -138,12 +138,10 @@ class _AddBookScreenState extends ConsumerState<AddBookScreen> with SingleTicker
   }
 
   Future<void> _saveBook() async {
-    // Проверяем валидацию формы
     if (!_formKey.currentState!.validate()) {
       return;
     }
 
-    // Для новой книги проверяем наличие файла
     if (_filePath == null && !_isEditMode) {
       setState(() {
         _errorMessage = 'Выберите файл';
@@ -152,10 +150,12 @@ class _AddBookScreenState extends ConsumerState<AddBookScreen> with SingleTicker
     }
 
     final repo = ref.read(bookRepositoryProvider);
-    final addBook = AddBook(repo);
+    // AddBook - это use case, убедись, что он принимает обновленный репозиторий
+    final addBookUseCase = AddBook(repo);
 
     try {
       if (_isEditMode) {
+        // КРИТИЧНО: Передаем текущую позицию, чтобы не сбросить прогресс
         final book = BookEntity(
           id: widget.book!.id,
           title: _titleController.text.trim(),
@@ -164,28 +164,30 @@ class _AddBookScreenState extends ConsumerState<AddBookScreen> with SingleTicker
           format: _fileFormat ?? widget.book!.format,
           coverPath: widget.book?.coverPath,
           progress: widget.book?.progress ?? 0,
+          position: widget.book?.position ?? 0.0, // СОХРАНЯЕМ ПОЗИЦИЮ
           category: _categoryController.text.trim().isEmpty ? null : _categoryController.text.trim(),
         );
-        await repo.updateBook(book);
+
+        // В репозитории обычно метод updateBook, убедись, что он есть
+        await repo.databaseHelper.insertBook(book); // insertBook в режиме replace работает как update
       } else {
-        await addBook(
+        // Создание новой книги через UseCase
+        await addBookUseCase(
           filePath: _filePath!,
           title: _titleController.text.trim(),
           author: _authorController.text.trim(),
-          category: _categoryController.text.trim().isEmpty ? null : _categoryController.text.trim(),
+          category: _categoryController.text.trim().isEmpty ? 'Fiction' : _categoryController.text.trim(),
         );
       }
 
-      // Просто возвращаем результат - обновлением займется LibraryScreen
       if (mounted) {
-        Navigator.pop(context, {
-          'result': true,
-          'category': _categoryController.text.trim().isEmpty ? null : _categoryController.text.trim()
-        });
+        // Возвращаем true, чтобы LibraryScreen знал, что нужно обновить список
+        Navigator.pop(context, true);
       }
     } catch (e) {
+      print('Ошибка при сохранении: $e');
       setState(() {
-        _errorMessage = 'Ошибка сохранения книги: $e';
+        _errorMessage = 'Ошибка сохранения: $e';
       });
     }
   }

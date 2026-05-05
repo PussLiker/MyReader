@@ -1,4 +1,5 @@
 import 'dart:async';
+import '../../domain/entities/reader_settings.dart';
 import '../widgets/selection_toolbar.dart';
 import 'package:flutter/material.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
@@ -11,6 +12,7 @@ import 'package:share_plus/share_plus.dart';
 import '../../domain/parsers/epub_parser.dart';
 import '../../domain/parsers/fb2_parser.dart';
 import '../../domain/use_cases/text_transformer.dart';
+import '../widgets/settings_panel.dart';
 
 class ReaderScreen extends ConsumerStatefulWidget {
   final BookEntity book;
@@ -26,7 +28,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   List<ChapterEntity> _chapters = [];
   bool _isLoading = true;
   String _errorMessage = '';
-  final _scrollController = ScrollController();
+  late var _scrollController = ScrollController();
   int _currentCharOffset = 0;
   List<ReadingPosition> _bookmarks = [];
   List<ReadingPosition> _quotes = [];
@@ -35,11 +37,121 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   bool _showSelectionToolbar = false;
   Map<int, List<ReadingPosition>> _indexedMarks = {};
   Timer? _savePositionTimer;
+  ReaderSettings _readerSettings = const ReaderSettings(
+    fontFamily: "serif",
+    fontSize: 18.0,
+  );
+  double _currentChapterProgress = 0.0; // Процент внутри главы (0.0 - 1.0)
+
+  void _scrollListener() {
+    if (_scrollController.hasClients) {
+      final max = _scrollController.position.maxScrollExtent;
+      final current = _scrollController.offset;
+      final newProgress = max > 0 ? (current / max) : 0.0;
+
+      if ((newProgress - _currentChapterProgress).abs() > 0.01) { // Оптимизация частоты обновлений
+        setState(() {
+          _currentChapterProgress = newProgress;
+        });
+      }
+    }
+  }
+
+  double _getCurrentScrollPercent() {
+    if (_scrollController.hasClients) {
+      final max = _scrollController.position.maxScrollExtent;
+      final current = _scrollController.offset;
+      return max > 0 ? (current / max) : 0.0;
+    }
+    return 0.0;
+  }
+
+  void _savePosition() {
+    _savePositionTimer?.cancel();
+    _savePositionTimer = Timer(const Duration(seconds: 1), () async {
+      if (!_scrollController.hasClients) return;
+
+      final maxScroll = _scrollController.position.maxScrollExtent;
+      final currentScroll = _scrollController.offset;
+
+      // Вычисляем процент
+      final double percent = maxScroll > 0 ? (currentScroll / maxScroll) : 0.0;
+
+      try {
+        await DatabaseHelper.instance.updatePosition(
+            widget.book.id,
+            _currentChapterIndex.toInt(), // Глава -> progress
+            percent                       // Процент -> position
+        );
+      } catch (e) {
+        print('Ошибка сохранения в БД: $e');
+      }
+    });
+  }
+
+  void _restoreScrollPosition(double percent) async {
+    print("Попытка перехода на процент: $percent");
+
+    // Даем чуть больше времени на расчет высоты (особенно для тяжелых глав)
+    await Future.delayed(const Duration(milliseconds: 300));
+
+    if (_scrollController.hasClients) {
+      final maxScroll = _scrollController.position.maxScrollExtent;
+
+      // Если высота еще не рассчитана (бывает на больших текстах)
+      if (maxScroll <= 100) {
+        await Future.delayed(const Duration(milliseconds: 200));
+        return _restoreScrollPosition(percent); // Рекурсивно пробуем еще раз
+      }
+
+      final target = maxScroll * percent;
+
+      // Используем animateTo, чтобы видеть, куда летит камера (помогает в отладке)
+      _scrollController.animateTo(
+        target,
+        duration: const Duration(milliseconds: 600),
+        curve: Curves.easeInOutCubic,
+      );
+    }
+  }
 
   @override
   void initState() {
     super.initState();
+    _scrollController = ScrollController();
+    // Используем ОДИН метод для всех задач скролла
+    _scrollController.addListener(_updateProgressBar);
     _loadBook();
+  }
+
+  void _updateProgressBar() {
+    if (_scrollController.hasClients) {
+      final maxScroll = _scrollController.position.maxScrollExtent;
+      final currentScroll = _scrollController.offset;
+
+      setState(() {
+        _currentChapterProgress = maxScroll > 0 ? (currentScroll / maxScroll) : 0.0;
+      });
+
+      // Вызываем сохранение (оно у нас с Debounce, так что в БД не заспамит)
+      _savePosition();
+    }
+  }
+
+
+  // Оставляем один универсальный метод для индексации
+  void _refreshTextMarkers() {
+    final Map<int, List<ReadingPosition>> newMap = {};
+    final allMarks = [..._bookmarks, ..._quotes];
+
+    for (var mark in allMarks) {
+      final int chapterIdx = mark.chapterIndex.floor();
+      newMap.putIfAbsent(chapterIdx, () => []).add(mark);
+    }
+
+    setState(() {
+      _indexedMarks = newMap;
+    });
   }
 
   Future<void> _loadBook() async {
@@ -49,50 +161,65 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
         _errorMessage = '';
       });
 
+      // 1. Получаем данные из БД для сверки
       final updatedBook = await DatabaseHelper.instance.getBookById(widget.book.id);
-      _currentChapterIndex = updatedBook?.position ?? 0.0;
 
-      await _loadBookmarksAndQuotes();
+      // Определяем целевую главу (приоритет у данных из Navigator.push)
+      double targetChapter = (widget.book.progress > 0
+          ? widget.book.progress
+          : (updatedBook?.progress ?? 0)).toDouble();
 
+      // Определяем целевой процент скролла
+      final double targetPercent = widget.book.position > 0
+          ? widget.book.position
+          : (updatedBook?.position ?? 0.0);
+
+      final bookmarks = await DatabaseHelper.instance.getBookmarksWithPosition(widget.book.id);
+      final quotes = await DatabaseHelper.instance.getQuotesWithPosition(widget.book.id);
+
+      // 2. Парсинг контента
       List<ChapterEntity> chapters = [];
-
-      switch (widget.book.format) {
-        case 'EPUB':
-          final parser = EpubParser();
-          chapters = await parser.parseChapters(widget.book.path);
-          break;
-        case 'FB2':
-          final parser = Fb2Parser();
-          chapters = await parser.parseChapters(widget.book.path);
-          break;
-        case 'TXT':
-          final parser = TxtParser();
-          chapters = await parser.parseChapters(widget.book.path);
-          break;
-        default:
-          throw Exception('Неподдерживаемый формат: ${widget.book.format}');
+      switch (widget.book.format.toUpperCase()) {
+        case 'EPUB': chapters = await EpubParser().parseChapters(widget.book.path); break;
+        case 'FB2':  chapters = await Fb2Parser().parseChapters(widget.book.path); break;
+        case 'TXT':  chapters = await TxtParser().parseChapters(widget.book.path); break;
+        default: throw Exception('Неподдерживаемый формат');
       }
 
-      if (chapters.isEmpty) {
-        throw Exception('Не удалось загрузить содержание книги');
-      }
+      if (chapters.isEmpty) throw Exception('Книга пуста');
+      if (!mounted) return;
 
+      // 3. Обновляем состояние одним блоком
       setState(() {
         _chapters = chapters;
+        _bookmarks = bookmarks;
+        _quotes = quotes;
+
+        // Защита от выхода за границы списка глав
+        _currentChapterIndex = targetChapter.clamp(0.0, (chapters.length - 1).toDouble());
         _isLoading = false;
-        _currentChapterIndex = _currentChapterIndex.clamp(0.0, _chapters.length - 1.0);
       });
 
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _handleInitialPosition();
-      });
+      // Генерируем карту меток (курсив/выделение)
+      _refreshTextMarkers();
+
+      // 4. Восстанавливаем позицию после отрисовки кадра
+
+      if (targetPercent > 0) {
+        // Выполняем после того, как Flutter построит дерево виджетов
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _restoreScrollPosition(targetPercent);
+        });
+      }
 
     } catch (e) {
-      print('Error loading book: $e');
-      setState(() {
-        _isLoading = false;
-        _errorMessage = 'Ошибка загрузки книги: ${e.toString()}';
-      });
+      print('ОШИБКА ЗАГРУЗКИ: $e');
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _errorMessage = "Не удалось загрузить книгу. Проверьте файл.";
+        });
+      }
     }
   }
 
@@ -134,42 +261,19 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     return _chapters[_currentChapterIndex.floor()];
   }
 
-  void _savePosition() {
-    // Отменяем предыдущий таймер, если он еще не сработал
-    _savePositionTimer?.cancel();
 
-    // Запускаем новый таймер на 1 секунду
-    _savePositionTimer = Timer(const Duration(seconds: 1), () async {
-      try {
-        await DatabaseHelper.instance.updatePosition(widget.book.id, _currentChapterIndex);
-        print('Позиция сохранена: $_currentChapterIndex');
-      } catch (e) {
-        print('Ошибка сохранения позиции: $e');
-      }
-    });
-  }
 
-  void _goToPosition(double chapterIndex, [int charOffset = 0]) {
-    // Защита от выхода за пределы списка глав
+  void _goToPosition(double chapterIndex, {double percent = 0.0, int charOffset = 0}) {
     if (_chapters.isEmpty) return;
 
-    final targetIdx = chapterIndex.clamp(0.0, _chapters.length - 1.0);
-
     setState(() {
-      _currentChapterIndex = targetIdx;
-      _currentCharOffset = charOffset;
-      _isTextSelected = false;
-      _showSelectionToolbar = false;
+      _currentChapterIndex = chapterIndex.clamp(0.0, (_chapters.length - 1).toDouble());
+      _isLoading = false; // На случай если вызвали во время загрузки
     });
 
-    _savePosition();
-
-    if (_scrollController.hasClients) {
-      _scrollController.jumpTo(0);
-    }
-
+    // Ждем, пока Flutter отрисует новую главу, и скроллим к проценту
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _scrollToCharOffset(charOffset);
+      _restoreScrollPosition(percent);
     });
   }
 
@@ -313,42 +417,31 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     );
   }
 
-  void _addBookmarkAtSelection() {
-    if (!_selection.isValid || _selection.start == _selection.end) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Выделите текст для закладки'),
-          backgroundColor: Colors.orange,
-        ),
-      );
-      return;
-    }
-
-    final chapter = _currentChapter;
-    if (chapter == null) return;
-
-    String selectedText = chapter.content.substring(
-      _selection.start,
-      _selection.end,
-    ).trim();
-
-    if (selectedText.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Не удалось выделить текст'),
-          backgroundColor: Colors.orange,
-        ),
-      );
-      return;
-    }
+  // В ReaderScreen.dart найди метод сохранения закладки/цитаты
+  void _addBookmarkAtSelection() async {
+    // Рассчитываем процент скролла в момент нажатия
+    final maxScroll = _scrollController.position.maxScrollExtent;
+    final currentOffset = _scrollController.offset;
+    final scrollPercent = maxScroll > 0 ? (currentOffset / maxScroll) : 0.0;
 
     final position = ReadingPosition(
-      chapterIndex: _currentChapterIndex,
+      chapterIndex: _currentChapterIndex, // Номер текущей главы
+      position: scrollPercent,           // Тот самый процент для перехода
       charOffset: _selection.start,
-      selectedText: selectedText,
+      selectedText: _chapters[_currentChapterIndex.toInt()].content.substring(
+          _selection.start,
+          _selection.end
+      ),
     );
 
-    _showBookmarkDialog(position);
+    // Вызываем твой метод из DatabaseHelper
+    await DatabaseHelper.instance.addBookmarkWithPosition(
+        widget.book.id,
+        position,
+        "Закладка"
+    );
+
+    await _loadBookmarksAndQuotes(); // Обновляем список в UI
   }
 
   void _showBookmarkDialog(ReadingPosition position) {
@@ -447,13 +540,10 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     );
   }
 
-  void _saveQuoteAtSelection() {
+  Future<void> _saveQuoteAtSelection() async {
     if (!_selection.isValid || _selection.start == _selection.end) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Выделите текст для цитаты'),
-          backgroundColor: Colors.orange,
-        ),
+        const SnackBar(content: Text('Выделите текст для цитаты'), backgroundColor: Colors.orange),
       );
       return;
     }
@@ -461,129 +551,114 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     final chapter = _currentChapter;
     if (chapter == null) return;
 
-    String selectedText = chapter.content.substring(
+    final String selectedText = chapter.content.substring(
       _selection.start,
       _selection.end,
     ).trim();
 
-    if (selectedText.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Не удалось выделить текст'),
-          backgroundColor: Colors.orange,
-        ),
-      );
-      return;
-    }
+    if (selectedText.isEmpty) return;
+
+
 
     final position = ReadingPosition(
       chapterIndex: _currentChapterIndex,
+      position: _getCurrentScrollPercent(), // Передаем свежий расчет
       charOffset: _selection.start,
       selectedText: selectedText,
     );
 
-    _showQuoteDialog(position, selectedText);
+    final bool? isSaved = await _showQuoteDialog(position, selectedText);
+
+    if (isSaved == true) {
+      // Обновляем данные
+      final updatedQuotes = await DatabaseHelper.instance.getQuotesWithPosition(widget.book.id);
+      setState(() {
+        _quotes = updatedQuotes;
+        _isTextSelected = false;
+        _showSelectionToolbar = false;
+      });
+      _refreshTextMarkers();
+    }
   }
 
-  void _showQuoteDialog(ReadingPosition position, String selectedText) {
+  Future<bool?> _showQuoteDialog(ReadingPosition position, String selectedText) {
     final noteController = TextEditingController();
-    showDialog(
+
+    // Возвращаем результат showDialog (true если сохранили, null если отменили)
+    return showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFFEDE7D9),
         title: const Text(
           'Сохранить цитату',
-          style: TextStyle(color: Color(0xFF4E342E)),
+          style: TextStyle(color: Color(0xFF4E342E), fontWeight: FontWeight.bold),
         ),
         content: SizedBox(
           width: double.maxFinite,
-          child: ListView(
-            shrinkWrap: true,
-            physics: const ClampingScrollPhysics(),
-            children: [
-              const Text(
-                'Выделенный текст:',
-                style: TextStyle(
-                  color: Color(0xFF4E342E),
-                  fontWeight: FontWeight.bold,
+          child: SingleChildScrollView( // Заменил ListView на SingleChildScrollView для лучшей работы с клавиатурой
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Выделенный текст:',
+                  style: TextStyle(color: Color(0xFF4E342E), fontSize: 12),
                 ),
-              ),
-              const SizedBox(height: 8),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFBCAAA4),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  selectedText,
-                  style: const TextStyle(color: Color(0xFF4E342E)),
-                ),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: noteController,
-                decoration: const InputDecoration(
-                  labelText: 'Заметка (опционально)',
-                  labelStyle: TextStyle(color: Color(0xFF4E342E)),
-                  enabledBorder: UnderlineInputBorder(
-                    borderSide: BorderSide(color: Color(0xFF7B5E57)),
+                const SizedBox(height: 8),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFD7CCC8),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    selectedText,
+                    style: const TextStyle(color: Color(0xFF4E342E), fontStyle: FontStyle.italic),
                   ),
                 ),
-                style: const TextStyle(color: Color(0xFF4E342E)),
-              ),
-            ],
+                const SizedBox(height: 16),
+                TextField(
+                  controller: noteController,
+                  autofocus: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Ваш комментарий',
+                    labelStyle: TextStyle(color: Color(0xFF7B5E57)),
+                    focusedBorder: UnderlineInputBorder(
+                      borderSide: BorderSide(color: Color(0xFF4E342E), width: 2),
+                    ),
+                  ),
+                  style: const TextStyle(color: Color(0xFF4E342E)),
+                ),
+              ],
+            ),
           ),
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text(
-              'Отмена',
-              style: TextStyle(color: Color(0xFF4E342E)),
-            ),
-          ),
-          TextButton(
-            onPressed: () => _shareQuote(selectedText),
-            child: const Text(
-              'Поделиться',
-              style: TextStyle(color: Color(0xFF4E342E)),
-            ),
+            onPressed: () => Navigator.pop(context, false), // Возвращаем false
+            child: const Text('Отмена', style: TextStyle(color: Color(0xFF7B5E57))),
           ),
           TextButton(
             onPressed: () async {
               try {
+                // Сохраняем в БД
                 await DatabaseHelper.instance.addQuoteWithPosition(
                   widget.book.id,
                   position,
                   selectedText,
-                  noteController.text.isEmpty ? null : noteController.text,
+                  noteController.text.trim().isEmpty ? null : noteController.text.trim(),
                 );
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Цитата сохранена'),
-                    backgroundColor: Color(0xFF8D6E63),
-                  ),
-                );
-                await _loadBookmarksAndQuotes();
-                setState(() {
-                  _isTextSelected = false;
-                  _showSelectionToolbar = false;
-                });
+
+                if (!context.mounted) return;
+                Navigator.pop(context, true); // Возвращаем true - сигнал к обновлению UI
               } catch (e) {
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Ошибка: $e'),
-                    backgroundColor: Colors.red,
-                  ),
-                );
+                print("Ошибка сохранения цитаты: $e");
+                Navigator.pop(context, false);
               }
             },
             child: const Text(
               'Сохранить',
-              style: TextStyle(color: Color(0xFF4E342E)),
+              style: TextStyle(color: Color(0xFF4E342E), fontWeight: FontWeight.bold),
             ),
           ),
         ],
@@ -606,26 +681,23 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     Share.share(shareText);
   }
 
-  void _goToBookmark(ReadingPosition position) {
-    if (widget.book.format == 'EPUB') {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Для EPUB переход осуществляется к началу главы'),
-          backgroundColor: Color(0xFF8D6E63),
-          duration: Duration(seconds: 2),
-        ),
-      );
-    }
+  void _goToBookmark(ReadingPosition mark) async {
+    // 1. Сначала переключаем главу
+    setState(() {
+      _currentChapterIndex = mark.chapterIndex;
+    });
 
-    _goToPosition(position.chapterIndex, position.charOffset);
+    // 2. КРИТИЧНО: Ждем, пока Flutter отрисует новую главу (300мс обычно хватает)
+    await Future.delayed(const Duration(milliseconds: 300));
 
-    if (position.selectedText != null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Закладка: ${position.selectedText}'),
-          backgroundColor: const Color(0xFF8D6E63),
-          duration: const Duration(seconds: 3),
-        ),
+    // 3. Теперь скроллим к проценту
+    if (_scrollController.hasClients) {
+      final maxScroll = _scrollController.position.maxScrollExtent;
+
+      _scrollController.animateTo(
+        maxScroll * mark.position,
+        duration: const Duration(milliseconds: 600),
+        curve: Curves.easeInOutCubic,
       );
     }
   }
@@ -1100,6 +1172,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     );
   }
 
+
   Widget _buildTextContent(ChapterEntity chapter) {
     // Используем LayoutBuilder, чтобы точно знать доступную высоту
     return LayoutBuilder(
@@ -1159,9 +1232,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     final currentChapterMarks = _indexedMarks[_currentChapterIndex.floor()] ?? [];
 
     // Делегируем работу сервису
-    return TextTransformer.buildHighlightedSpan(text, currentChapterMarks);
+    return TextTransformer.buildHighlightedSpan(text, currentChapterMarks, _readerSettings);
   }
-
 
 
   Widget _buildContent() {
@@ -1183,6 +1255,30 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     if (widget.initialCharOffset != null && _chapters.isNotEmpty) {
       _scrollToCharOffset(widget.initialCharOffset!);
     }
+  }
+
+  void _showSettings() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => SettingsPanel(
+        settings: _readerSettings,
+        onSettingsChanged: (newSettings) {
+          // Запоминаем, где мы были в процентах ПЕРЕД сменой шрифта
+          final double currentPercent = _currentChapterProgress;
+
+          setState(() {
+            _readerSettings = newSettings;
+          });
+
+          // После перерисовки текста с новым шрифтом — возвращаемся на тот же процент
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _restoreScrollPosition(currentPercent);
+          });
+        },
+      ),
+    );
   }
 
   @override
@@ -1214,6 +1310,11 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
             onPressed: _showChaptersDialog,
             tooltip: 'Оглавление',
           ),
+          IconButton(
+            icon: const Icon(Icons.text_fields, color: Color(0xFF7B5E57)),
+            onPressed: _showSettings,
+            tooltip: 'Настройки текста',
+          ),
         ],
       ),
       body: GestureDetector(
@@ -1225,20 +1326,11 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
           }
         },
         child: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 400),
-          // Добавляем этот параметр, чтобы дочерний виджет занимал всё пространство
-          layoutBuilder: (Widget? currentChild, List<Widget> previousChildren) {
-            return SizedBox.expand(
-              child: Stack(
-                children: [
-                  ...previousChildren,
-                  if (currentChild != null) currentChild,
-                ],
-              ),
-            );
+          duration: const Duration(milliseconds: 150), 
+          transitionBuilder: (Widget child, Animation<double> animation) {
+            return FadeTransition(opacity: animation, child: child);
           },
           child: KeyedSubtree(
-            // Ключ важен для работы AnimatedSwitcher
             key: ValueKey<double>(_currentChapterIndex),
             child: _buildContent(),
           ),
@@ -1258,12 +1350,12 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                 onTap: _showChaptersDialog,
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
-                  mainAxisSize: MainAxisSize.min, 
+                  mainAxisSize: MainAxisSize.min,
                   children: [
                     if (_currentChapter != null) // Защита от null
                       Text(
                         _currentChapter!.title,
-                        style: const TextStyle(color: Color(0xFF4E342E), fontSize: 11),
+                        style: const TextStyle(color: Color(0xFF4E342E), fontSize: 16),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         textAlign: TextAlign.center,
@@ -1271,11 +1363,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                     const SizedBox(height: 4),
                     ClipRRect(
                       borderRadius: BorderRadius.circular(10),
-                      child: LinearProgressIndicator(
-                        // Добавляем проверку на пустой список глав, чтобы не делить на 0
-                        value: _chapters.isNotEmpty
-                            ? (_currentChapterIndex + 1) / _chapters.length
-                            : 0,
+                      child: // Внутри BottomAppBar -> Expanded -> Column:
+                      LinearProgressIndicator(
+                        value: _currentChapterProgress, // Теперь это процент внутри текущей главы
                         backgroundColor: const Color(0xFFD7CCC8),
                         valueColor: const AlwaysStoppedAnimation(Color(0xFF7B5E57)),
                         minHeight: 6,
@@ -1295,10 +1385,44 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     );
   }
 
+  // Внутри класса _ReaderScreenState
   @override
   void dispose() {
-    _savePositionTimer?.cancel(); // Останавливаем таймер
+    _savePositionTimer?.cancel();
+    if (_scrollController.hasClients) {
+      _performImmediateSave();
+    }
+    _scrollController.removeListener(_updateProgressBar);
     _scrollController.dispose();
     super.dispose();
+  }
+
+  Future<void> _forceSaveCurrentPosition() async {
+    if (_scrollController.hasClients) {
+      final max = _scrollController.position.maxScrollExtent;
+      final current = _scrollController.offset;
+      final percent = max > 0 ? (current / max) : 0.0;
+
+      // Вызываем напрямую БД без таймеров
+      await DatabaseHelper.instance.updatePosition(
+        widget.book.id,
+        _currentChapterIndex.toInt(),
+        percent,
+      );
+      print("Позиция принудительно сохранена: глава ${_currentChapterIndex.toInt()}, $percent%");
+    }
+  }
+
+  Future<void> _performImmediateSave() async {
+    if (_scrollController.hasClients) {
+      final maxScroll = _scrollController.position.maxScrollExtent;
+      final percent = maxScroll > 0 ? (_scrollController.offset / maxScroll) : 0.0;
+
+      await DatabaseHelper.instance.updatePosition(
+        widget.book.id,
+        _currentChapterIndex.toInt(),
+        percent,
+      );
+    }
   }
 }

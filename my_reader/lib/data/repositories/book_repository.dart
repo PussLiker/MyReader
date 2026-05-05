@@ -1,12 +1,9 @@
 import 'dart:io';
-import 'dart:convert';
 import 'package:epubx/epubx.dart' as epub;
 import 'package:my_reader/data/db/database_helper.dart';
 import 'package:my_reader/domain/entities/book_entity.dart';
 import 'package:path/path.dart' as path;
-import 'package:path_provider/path_provider.dart';
 import 'package:xml/xml.dart';
-
 import '../../domain/entities/reading_position.dart';
 
 class BookRepository {
@@ -15,9 +12,11 @@ class BookRepository {
   BookRepository(this.databaseHelper);
 
   Future<List<BookEntity>> getBooks([String? category]) async {
-    return category == null
-        ? await databaseHelper.getBooks()
-        : await databaseHelper.getBooksByCategory(category);
+    // В DatabaseHelper мы используем фильтрацию на уровне получения списка,
+    // если метод getBooksByCategory отсутствует, фильтруем полученный список:
+    final allBooks = await databaseHelper.getBooks();
+    if (category == null) return allBooks;
+    return allBooks.where((book) => book.category == category).toList();
   }
 
   Future<int> addBook(
@@ -40,11 +39,9 @@ class BookRepository {
         author = epubBook.Author ?? author;
 
         final metadata = epubBook.Schema?.Package?.Metadata;
-        if (metadata != null && metadata.Subjects != null && metadata.Subjects!.isNotEmpty) {
-          category = metadata.Subjects!.join(', ');
+        if (categoryOverride == null && metadata?.Subjects != null && metadata!.Subjects!.isNotEmpty) {
+          category = metadata.Subjects!.first; // Берем первый тег как основную категорию
         }
-
-        print('EPUB book added: $title by $author');
       } catch (e) {
         print('Error reading EPUB: $e');
       }
@@ -64,20 +61,11 @@ class BookRepository {
         if (categoryOverride == null) {
           category = genre ?? 'Fiction';
         }
-
-        print('FB2 book added: $title by $author');
       } catch (e) {
         print('Error reading FB2: $e');
       }
     } else if (format == 'txt') {
       category = 'Text';
-      print('TXT book added: $title by $author');
-    } else {
-      throw Exception('Unsupported file format: $format');
-    }
-
-    if (!await databaseHelper.categoryExists(category)) {
-      await databaseHelper.insertCategory(category);
     }
 
     final book = BookEntity(
@@ -88,14 +76,16 @@ class BookRepository {
       format: format.toUpperCase(),
       coverPath: null,
       progress: 0,
+      position: 0.0, // Добавлено поле позиции
       category: category,
     );
 
     return await databaseHelper.insertBook(book);
   }
 
-  Future<void> updateBook(BookEntity book) async {
-    await databaseHelper.updateBook(book);
+  // Обновляем позицию чтения (используется при выходе из ридера)
+  Future<void> updateReadingStatus(int bookId, int chapterIndex, double positionPercent) async {
+    await databaseHelper.updatePosition(bookId, chapterIndex, positionPercent);
   }
 
   Future<void> deleteBook(int bookId) async {
@@ -106,38 +96,27 @@ class BookRepository {
     return await databaseHelper.getCategories();
   }
 
-  Future<void> updateProgress(int bookId, int progress) async {
-    await databaseHelper.updateProgress(bookId, progress);
+  // ЗАКЛАДКИ
+  Future<int> addBookmark(int bookId, ReadingPosition position, String note) async {
+    // Используем обновленный метод, который принимает объект позиции целиком
+    return await databaseHelper.addBookmarkWithPosition(bookId, position, note);
   }
 
-  Future<int> addBookmark(int bookId, double position, String note) async {
-    final positionObj = ReadingPosition(
-      chapterIndex: position,
-      charOffset: 0,
-      selectedText: note,
-    );
-    return await databaseHelper.addBookmarkWithPosition(bookId, positionObj, note);
-  }
-
-  Future<List<Map<String, dynamic>>> getBookmarks(int bookId) async {
-    return await databaseHelper.getBookmarksWithDetails(bookId);
+  Future<List<ReadingPosition>> getBookmarks(int bookId) async {
+    return await databaseHelper.getBookmarksWithPosition(bookId);
   }
 
   Future<void> deleteBookmark(int bookmarkId) async {
     await databaseHelper.deleteBookmarkById(bookmarkId);
   }
 
-  Future<int> addQuote(int bookId, double position, String quoteText, String? comment) async {
-    final positionObj = ReadingPosition(
-      chapterIndex: position,
-      charOffset: 0,
-      selectedText: quoteText,
-    );
-    return await databaseHelper.addQuoteWithPosition(bookId, positionObj, quoteText, comment);
+  // ЦИТАТЫ
+  Future<int> addQuote(int bookId, ReadingPosition position, String quoteText, String? comment) async {
+    return await databaseHelper.addQuoteWithPosition(bookId, position, quoteText, comment);
   }
 
-  Future<List<Map<String, dynamic>>> getQuotes(int bookId) async {
-    return await databaseHelper.getQuotesWithDetails(bookId);
+  Future<List<ReadingPosition>> getQuotes(int bookId) async {
+    return await databaseHelper.getQuotesWithPosition(bookId);
   }
 
   Future<void> deleteQuote(int quoteId) async {

@@ -1,64 +1,56 @@
 import 'package:flutter/material.dart';
-import '../../domain/entities/reading_position.dart';
+import '../entities/reading_position.dart';
+import '../entities/reader_settings.dart'; // Импортируй модель
 
 class TextTransformer {
-  /// Стиль для основного текста
-  static const TextStyle _baseStyle = TextStyle(
-    fontSize: 18.0,
-    height: 1.6,
-    color: Color(0xFF4E342E),
-    fontFamily: 'Georgia',
-  );
+  static TextSpan buildHighlightedSpan(
+      String text,
+      List<ReadingPosition> marks,
+      ReaderSettings settings // <--- Добавляем настройки сюда
+      ) {
+    // Создаем базовый стиль на основе настроек
+    final TextStyle baseStyle = TextStyle(
+      fontSize: settings.fontSize,
+      fontFamily: settings.fontFamily,
+      height: settings.lineHeight,
+      color: const Color(0xFF4E342E),
+    );
 
-  /// Стиль для выделенных цитат и закладок
-  static const TextStyle _highlightStyle = TextStyle(
-    fontSize: 18.0,
-    height: 1.6,
-    color: Color(0xFF4E342E),
-    backgroundColor: Color(0xFFFFF8E1), // Светло-желтый фон
-    fontStyle: FontStyle.italic,
-  );
+    final TextStyle highlightStyle = baseStyle.copyWith(
+      fontStyle: FontStyle.italic, // Курсив
+      backgroundColor: Colors.yellow.withOpacity(0.2), // Подсветка
+      color: const Color(0xFF4E342E), // Цвет текста цитаты
+    );
 
-  /// Основной метод, который превращает строку в дерево TextSpan.
-  /// Принимает уже отфильтрованные и отсортированные отметки для конкретной главы.
-  static TextSpan buildHighlightedSpan(String text, List<ReadingPosition> marks) {
     if (marks.isEmpty) {
-      return TextSpan(text: text, style: _baseStyle);
+      return TextSpan(text: text, style: baseStyle);
     }
 
     final spans = <TextSpan>[];
     int currentPosition = 0;
 
     for (final position in marks) {
-      // 1. Добавляем обычный текст ДО отметки
       if (position.charOffset > currentPosition) {
         spans.add(TextSpan(
           text: text.substring(currentPosition, position.charOffset),
-          style: _baseStyle,
+          style: baseStyle,
         ));
       }
 
-      // 2. Добавляем выделенный текст (цитата/закладка)
       final selectedText = position.selectedText ?? '';
       final textEnd = position.charOffset + selectedText.length;
 
-      // Проверка на выход за границы (защита от ошибок парсинга)
       if (textEnd <= text.length) {
         spans.add(TextSpan(
           text: text.substring(position.charOffset, textEnd),
-          style: _highlightStyle,
+          style: highlightStyle,
         ));
       }
-
       currentPosition = textEnd;
     }
 
-    // 3. Добавляем оставшийся хвост текста
     if (currentPosition < text.length) {
-      spans.add(TextSpan(
-        text: text.substring(currentPosition),
-        style: _baseStyle,
-      ));
+      spans.add(TextSpan(text: text.substring(currentPosition), style: baseStyle));
     }
 
     return TextSpan(children: spans);
