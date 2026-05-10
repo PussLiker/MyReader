@@ -25,35 +25,29 @@ class _QuotesScreenState extends ConsumerState<QuotesScreen> {
 
   Future<void> _loadQuotes() async {
     try {
-      final allQuotes = await DatabaseHelper.instance.getQuotesWithDetails();
+      // 1. Получаем сырые данные из БД
+      final rawQuotes = await DatabaseHelper.instance.getQuotesWithDetails();
       final quotesWithBooks = <Map<String, dynamic>>[];
 
-      for (final quote in allQuotes) {
-        final bookId = quote['book_id'] as int;
-        BookEntity? book;
+      for (final rawData in rawQuotes) {
+        final bookId = rawData['book_id'] as int;
 
+        // 2. Получаем объект книги (из кэша или БД)
+        BookEntity? book;
         if (_booksCache.containsKey(bookId)) {
           book = _booksCache[bookId];
         } else {
           book = await DatabaseHelper.instance.getBookById(bookId);
-          if (book != null) {
-            _booksCache[bookId] = book;
-          }
+          if (book != null) _booksCache[bookId] = book;
         }
 
         if (book != null) {
           quotesWithBooks.add({
-            'quote': quote,
+            'quote': rawData, // Вся строка из таблицы quotes
             'book': book,
           });
         }
       }
-
-      quotesWithBooks.sort((a, b) {
-        final bookA = a['book'] as BookEntity;
-        final bookB = b['book'] as BookEntity;
-        return bookA.title.compareTo(bookB.title);
-      });
 
       if (mounted) {
         setState(() {
@@ -62,42 +56,33 @@ class _QuotesScreenState extends ConsumerState<QuotesScreen> {
         });
       }
     } catch (e) {
-      debugPrint('Error loading quotes: $e');
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
+      debugPrint('Ошибка загрузки цитат: $e');
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
   void _goToQuote(Map<String, dynamic> quoteData) async {
-    final quote = quoteData['quote'];
+    final quoteMap = quoteData['quote'];
     final book = quoteData['book'] as BookEntity;
 
-    final int chapterIndex = (quote['chapter_index'] as num?)?.toInt() ?? 0;
-    final double scrollPercent = (quote['position'] as num?)?.toDouble() ?? 0.0;
-    final int? charOffset = quote['char_offset'] as int?;
+    // Важно: проверяем типы данных, SQLite может вернуть int вместо double
+    final int chapterIndex = (quoteMap['chapter_index'] as num).toInt();
+    final double scrollPosition = (quoteMap['position'] as num).toDouble();
 
-    // Обновляем позицию в БД, чтобы книга открылась на цитате
-    await DatabaseHelper.instance.updatePosition(
-        book.id,
-        chapterIndex,
-        scrollPercent
-    );
+    // Обновляем прогресс книги, чтобы ридер открылся правильно
+    await DatabaseHelper.instance.updatePosition(book.id, chapterIndex, scrollPosition);
+
+    if (!mounted) return;
 
     final updatedBook = book.copyWith(
       progress: chapterIndex,
-      position: scrollPercent,
+      position: scrollPosition,
     );
-
-    if (!mounted) return;
 
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => ReaderScreen(
-          book: updatedBook,
-          initialCharOffset: charOffset,
-        ),
+        builder: (context) => ReaderScreen(book: updatedBook),
       ),
     ).then((_) => _loadQuotes());
   }

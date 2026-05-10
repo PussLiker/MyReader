@@ -135,6 +135,8 @@ class _AddBookScreenState extends ConsumerState<AddBookScreen> with SingleTicker
       });
       print('No file selected');
     }
+
+
   }
 
   Future<void> _saveBook() async {
@@ -168,8 +170,8 @@ class _AddBookScreenState extends ConsumerState<AddBookScreen> with SingleTicker
           category: _categoryController.text.trim().isEmpty ? null : _categoryController.text.trim(),
         );
 
-        // В репозитории обычно метод updateBook, убедись, что он есть
         await repo.databaseHelper.insertBook(book); // insertBook в режиме replace работает как update
+        ref.invalidate(getBooksProvider);
       } else {
         // Создание новой книги через UseCase
         await addBookUseCase(

@@ -291,19 +291,18 @@ class DatabaseHelper {
 
   // Получение всех цитат с данными о книгах
   Future<List<Map<String, dynamic>>> getQuotesWithDetails() async {
-    final db = await instance.database;
-
-    // Выполняем SQL запрос с объединением таблиц
-    // Предполагаем, что таблица цитат называется 'quotes', а книг — 'books'
+    final db = await database;
     return await db.rawQuery('''
-      SELECT 
-        q.*, 
-        b.title as book_title, 
-        b.author as book_author
-      FROM quotes q
-      JOIN books b ON q.book_id = b.id
-      ORDER BY b.title ASC, q.chapter_index ASC
-    ''');
+    SELECT 
+      q.*, 
+      b.id as book_id, 
+      b.title as book_title, 
+      authors.first_name || ' ' || authors.last_name as book_author
+    FROM quotes q
+    JOIN books b ON q.book_id = b.id
+    JOIN authors ON b.author_id = authors.id
+    ORDER BY b.title ASC, q.chapter_index ASC
+  ''');
   }
 
 
