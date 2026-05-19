@@ -80,6 +80,27 @@ class BookRepository {
 
     return await databaseHelper.insertBook(book);
   }
+  Future<void> updateBook(BookEntity book) async {
+    await databaseHelper.updateBook(book);
+  }
+
+  // --- Проверка существования закладки ---
+  Future<bool> bookmarkExists(int bookId, int charOffset) async {
+    return await databaseHelper.bookmarkExists(bookId, charOffset);
+  }
+
+  Future<void> cleanupOrphanedCategories() async {
+    await databaseHelper.cleanupOrphanedCategories();
+  }
+
+// --- Проверка существования цитаты ---
+  Future<bool> quoteExists(int bookId, int charOffset) async {
+    return await databaseHelper.quoteExists(bookId, charOffset);
+  }
+
+  Future<bool> anyMarkExists(int bookId, int charOffset) async {
+    return await databaseHelper.anyMarkExists(bookId, charOffset);
+  }
 
   Future<void> updateReadingStatus(int bookId, int chapterIndex, double positionPercent) async {
     await databaseHelper.updatePosition(bookId, chapterIndex, positionPercent);

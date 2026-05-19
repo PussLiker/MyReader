@@ -80,8 +80,8 @@ class _SettingsPanelState extends State<SettingsPanel> {
             icon: Icons.format_line_spacing,
             label: 'Высота строки',
             value: _localSettings.lineHeight,
-            min: 1.2,
-            max: 2.4,
+            min: 1.0,
+            max: 1.8,
             divisions: 12,
             formatValue: (val) => val.toStringAsFixed(1),
             onChanged: (val) {

@@ -305,6 +305,76 @@ class DatabaseHelper {
   ''');
   }
 
+// Метод для обновления книги
+  Future<int> updateBook(BookEntity book) async {
+    final db = await database;
+    final authorId = await getAuthorId(book.author);
+    final formatId = await getFormatId(book.format);
+    final categoryId = book.category != null ? await getCategoryId(book.category!) : null;
+
+    return await db.update(
+      'books',
+      {
+        'title': book.title,
+        'author_id': authorId,
+        'path': book.path,
+        'format_id': formatId,
+        'progress': book.progress,
+        'position': book.position,
+        'category_id': categoryId,
+      },
+      where: 'id = ?',
+      whereArgs: [book.id],
+    );
+  }
+
+  // --- Проверка существования закладки на той же позиции ---
+  Future<bool> bookmarkExists(int bookId, int charOffset) async {
+    final db = await database;
+    final result = await db.query(
+      'bookmarks',
+      where: 'book_id = ? AND char_offset = ?',
+      whereArgs: [bookId, charOffset],
+    );
+    return result.isNotEmpty;
+  }
+
+  Future<void> cleanupOrphanedCategories() async {
+    final db = await database;
+    await db.rawDelete('''
+    DELETE FROM categories 
+    WHERE id NOT IN (SELECT DISTINCT category_id FROM books WHERE category_id IS NOT NULL)
+  ''');
+  }
+
+// --- Проверка существования цитаты на той же позиции ---
+  Future<bool> quoteExists(int bookId, int charOffset) async {
+    final db = await database;
+    final result = await db.query(
+      'quotes',
+      where: 'book_id = ? AND char_offset = ?',
+      whereArgs: [bookId, charOffset],
+    );
+    return result.isNotEmpty;
+  }
+
+  Future<bool> anyMarkExists(int bookId, int charOffset) async {
+    final db = await database;
+
+    final bookmarks = await db.query(
+      'bookmarks',
+      where: 'book_id = ? AND char_offset = ?',
+      whereArgs: [bookId, charOffset],
+    );
+
+    final quotes = await db.query(
+      'quotes',
+      where: 'book_id = ? AND char_offset = ?',
+      whereArgs: [bookId, charOffset],
+    );
+
+    return bookmarks.isNotEmpty || quotes.isNotEmpty;
+  }
 
   Future<List<String>> getCategories() async {
     final db = await database;

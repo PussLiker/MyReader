@@ -159,7 +159,7 @@ class _AddBookScreenState extends ConsumerState<AddBookScreen> with SingleTicker
           category: _categoryController.text.trim().isEmpty ? null : _categoryController.text.trim(),
         );
 
-        await repo.databaseHelper.insertBook(updatedBook);
+        await repo.updateBook(updatedBook);
       } else {
         await addBookUseCase(
           filePath: _filePath!,
@@ -169,15 +169,18 @@ class _AddBookScreenState extends ConsumerState<AddBookScreen> with SingleTicker
         );
       }
 
-      // ИСПРАВЛЕНО: Инвалидируем ВСЕ провайдеры книг
+      // Инвалидируем ВСЕ провайдеры книг
       ref.invalidate(getBooksProvider(null));
       ref.invalidate(getAllBooksProvider);
 
-      // ИСПРАВЛЕНО: Добавляем принудительное обновление категорий
+      // Обновляем категории
       ref.invalidate(getCategoriesProvider);
 
+      // ДОБАВЛЕНО: Очищаем пустые категории из БД
+      await repo.cleanupOrphanedCategories();
+
       if (mounted) {
-        // ИСПРАВЛЕНО: Возвращаем true, а не просто закрываем
+        // Возвращаем true, а не просто закрываем
         Navigator.pop(context, true);
       }
     } catch (e) {

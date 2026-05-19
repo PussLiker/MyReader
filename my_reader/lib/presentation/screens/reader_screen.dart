@@ -1,5 +1,7 @@
 import 'dart:async';
 import '../../domain/entities/reader_settings.dart';
+import '../../domain/use_cases/settings_service.dart';
+import '../providers/book_provider.dart';
 import '../widgets/selection_toolbar.dart';
 import 'package:flutter/material.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
@@ -37,10 +39,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   bool _showSelectionToolbar = false;
   Map<int, List<ReadingPosition>> _indexedMarks = {};
   Timer? _savePositionTimer;
-  ReaderSettings _readerSettings = const ReaderSettings(
-    fontFamily: "serif",
-    fontSize: 18.0,
-  );
+  late ReaderSettings _readerSettings;
   double _currentChapterProgress = 0.0; // Процент внутри главы (0.0 - 1.0)
 
   void _scrollListener() {
@@ -166,6 +165,10 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
         _errorMessage = '';
       });
 
+      // Загружаем глобальные настройки
+      final settingsService = SettingsService();
+      _readerSettings = await settingsService.loadSettings();
+
       // 1. Получаем данные из БД для сверки
       final updatedBook = await DatabaseHelper.instance.getBookById(widget.book.id);
 
@@ -287,18 +290,6 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
 
     final chapter = _currentChapter;
     if (chapter == null) return;
-
-    // Для EPUB информируем пользователя
-    if (widget.book.format == 'EPUB') {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Точная навигация к строке недоступна для EPUB формата'),
-          backgroundColor: Colors.orange,
-          duration: Duration(seconds: 3),
-        ),
-      );
-      return;
-    }
 
     final textLength = chapter.content.length;
     if (textLength == 0) return;
@@ -422,133 +413,68 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     );
   }
 
-  // В ReaderScreen.dart найди метод сохранения закладки/цитаты
   void _addBookmarkAtSelection() async {
-    // Рассчитываем процент скролла в момент нажатия
+    final repo = ref.read(bookRepositoryProvider);
+
+    // Проверяем существование ЛЮБОЙ метки (закладка или цитата)
+    final exists = await repo.anyMarkExists(widget.book.id, _selection.start);
+
+    if (exists) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('На этом месте уже есть закладка или цитата'),
+            backgroundColor: Color(0xFF8D6E63), // Тот же цвет, что у основной темы
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+      return;
+    }
+
+    // Рассчитываем процент скролла
     final maxScroll = _scrollController.position.maxScrollExtent;
     final currentOffset = _scrollController.offset;
     final scrollPercent = maxScroll > 0 ? (currentOffset / maxScroll) : 0.0;
 
+    final selectedText = _chapters[_currentChapterIndex.toInt()].content.substring(
+      _selection.start,
+      _selection.end,
+    ).trim();
+
     final position = ReadingPosition(
-      chapterIndex: _currentChapterIndex, // Номер текущей главы
-      position: scrollPercent,           // Тот самый процент для перехода
+      chapterIndex: _currentChapterIndex,
+      position: scrollPercent,
       charOffset: _selection.start,
-      selectedText: _chapters[_currentChapterIndex.toInt()].content.substring(
-          _selection.start,
-          _selection.end
-      ),
+      selectedText: selectedText,
     );
 
-    // Вызываем твой метод из DatabaseHelper
     await DatabaseHelper.instance.addBookmarkWithPosition(
-        widget.book.id,
-        position,
-        "Закладка"
+      widget.book.id,
+      position,
+      "Закладка",
     );
 
-    await _loadBookmarksAndQuotes(); // Обновляем список в UI
-  }
+    await _loadBookmarksAndQuotes();
 
-  void _showBookmarkDialog(ReadingPosition position) {
-    final controller = TextEditingController();
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFFEDE7D9),
-        title: const Text(
-          'Добавить закладку',
-          style: TextStyle(color: Color(0xFF4E342E)),
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Закладка добавлена'),
+          backgroundColor: Color(0xFF8D6E63),
+          duration: Duration(seconds: 1),
         ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (position.selectedText != null) ...[
-              const Text(
-                'Выделенный текст:',
-                style: TextStyle(
-                  color: Color(0xFF4E342E),
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFBCAAA4),
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: Text(
-                  position.selectedText!,
-                  style: const TextStyle(color: Color(0xFF4E342E)),
-                ),
-              ),
-              const SizedBox(height: 16),
-            ],
-            TextField(
-              controller: controller,
-              decoration: const InputDecoration(
-                labelText: 'Комментарий',
-                labelStyle: TextStyle(color: Color(0xFF4E342E)),
-                enabledBorder: UnderlineInputBorder(
-                  borderSide: BorderSide(color: Color(0xFF7B5E57)),
-                ),
-              ),
-              style: const TextStyle(color: Color(0xFF4E342E)),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text(
-              'Отмена',
-              style: TextStyle(color: Color(0xFF4E342E)),
-            ),
-          ),
-          TextButton(
-            onPressed: () async {
-              try {
-                await DatabaseHelper.instance.addBookmarkWithPosition(
-                  widget.book.id,
-                  position,
-                  controller.text.isEmpty ? 'Закладка' : controller.text,
-                );
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Закладка добавлена'),
-                    backgroundColor: Color(0xFF8D6E63),
-                  ),
-                );
-                await _loadBookmarksAndQuotes();
-                setState(() {
-                  _isTextSelected = false;
-                  _showSelectionToolbar = false;
-                });
-              } catch (e) {
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Ошибка: $e'),
-                    backgroundColor: Colors.red,
-                  ),
-                );
-              }
-            },
-            child: const Text(
-              'Сохранить',
-              style: TextStyle(color: Color(0xFF4E342E)),
-            ),
-          ),
-        ],
-      ),
-    );
+      );
+    }
   }
 
   Future<void> _saveQuoteAtSelection() async {
     if (!_selection.isValid || _selection.start == _selection.end) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Выделите текст для цитаты'), backgroundColor: Colors.orange),
+        const SnackBar(
+          content: Text('Выделите текст для цитаты'),
+          backgroundColor: Color(0xFF8D6E63),
+        ),
       );
       return;
     }
@@ -563,11 +489,27 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
 
     if (selectedText.isEmpty) return;
 
+    final repo = ref.read(bookRepositoryProvider);
 
+    // Проверяем существование ЛЮБОЙ метки (закладка или цитата)
+    final exists = await repo.anyMarkExists(widget.book.id, _selection.start);
+
+    if (exists) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('На этом месте уже есть закладка или цитата'),
+            backgroundColor: Color(0xFF8D6E63),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+      return;
+    }
 
     final position = ReadingPosition(
       chapterIndex: _currentChapterIndex,
-      position: _getCurrentScrollPercent(), // Передаем свежий расчет
+      position: _getCurrentScrollPercent(),
       charOffset: _selection.start,
       selectedText: selectedText,
     );
@@ -575,7 +517,6 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     final bool? isSaved = await _showQuoteDialog(position, selectedText);
 
     if (isSaved == true) {
-      // Обновляем данные
       final updatedQuotes = await DatabaseHelper.instance.getQuotesWithPosition(widget.book.id);
       setState(() {
         _quotes = updatedQuotes;
@@ -583,6 +524,16 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
         _showSelectionToolbar = false;
       });
       _refreshTextMarkers();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Цитата сохранена'),
+            backgroundColor: Color(0xFF8D6E63),
+            duration: Duration(seconds: 1),
+          ),
+        );
+      }
     }
   }
 
@@ -1162,10 +1113,10 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   Widget _buildSelectableEpubContent(String content) {
     return SelectableText.rich(
       _buildTextWithHighlights(content),
-      style: const TextStyle(
+      style: TextStyle(
         fontSize: 18.0,
-        height: 1.6,
-        color: Color(0xFF4E342E),
+        height: _readerSettings.lineHeight,
+        color: const Color(0xFF4E342E),
       ),
       onSelectionChanged: (selection, cause) {
         setState(() {
@@ -1194,10 +1145,10 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                 child: RepaintBoundary(
                   child: SelectableText.rich(
                     _buildTextWithHighlights(chapter.content),
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 18.0,
-                      height: 1.6,
-                      color: Color(0xFF4E342E),
+                      height: _readerSettings.lineHeight,
+                      color: const Color(0xFF4E342E),
                     ),
                     onSelectionChanged: (selection, cause) {
                       setState(() {
@@ -1269,15 +1220,17 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
       backgroundColor: Colors.transparent,
       builder: (context) => SettingsPanel(
         settings: _readerSettings,
-        onSettingsChanged: (newSettings) {
-          // Запоминаем, где мы были в процентах ПЕРЕД сменой шрифта
+        onSettingsChanged: (newSettings) async {
           final double currentPercent = _currentChapterProgress;
 
           setState(() {
             _readerSettings = newSettings;
           });
 
-          // После перерисовки текста с новым шрифтом — возвращаемся на тот же процент
+          // ДОБАВЛЕНО: Сохраняем глобальные настройки
+          final settingsService = SettingsService();
+          await settingsService.saveSettings(newSettings);
+
           WidgetsBinding.instance.addPostFrameCallback((_) {
             _restoreScrollPosition(currentPercent);
           });
