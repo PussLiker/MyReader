@@ -8,6 +8,6 @@ class GetBooks {
   GetBooks(this.repository);
 
   Future<List<BookEntity>> call({String? category}) async {
-    return await repository.getBooks();
+    return await repository.getBooks(category);
   }
 }

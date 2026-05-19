@@ -89,10 +89,15 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     });
   }
 
-  void _restoreScrollPosition(double percent) async {
-    print("Попытка перехода на процент: $percent");
+  void _restoreScrollPosition(double percent, {int retryCount = 0}) async {
+    print("Попытка перехода на процент: $percent (попытка $retryCount)");
 
-    // Даем чуть больше времени на расчет высоты (особенно для тяжелых глав)
+    // Защита от бесконечной рекурсии — максимум 5 попыток
+    if (retryCount > 5) {
+      print("Превышено количество попыток восстановления позиции");
+      return;
+    }
+
     await Future.delayed(const Duration(milliseconds: 300));
 
     if (_scrollController.hasClients) {
@@ -101,12 +106,12 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
       // Если высота еще не рассчитана (бывает на больших текстах)
       if (maxScroll <= 100) {
         await Future.delayed(const Duration(milliseconds: 200));
-        return _restoreScrollPosition(percent); // Рекурсивно пробуем еще раз
+        _restoreScrollPosition(percent, retryCount: retryCount + 1);
+        return;
       }
 
-      final target = maxScroll * percent;
+      final target = maxScroll * percent.clamp(0.0, 1.0);
 
-      // Используем animateTo, чтобы видеть, куда летит камера (помогает в отладке)
       _scrollController.animateTo(
         target,
         duration: const Duration(milliseconds: 600),

@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
-import 'package:my_reader/data/db/database_helper.dart';
 import 'package:my_reader/domain/entities/book_entity.dart';
+import 'package:my_reader/domain/entities/reading_position.dart';
+import 'package:my_reader/presentation/providers/book_provider.dart';
 import 'package:my_reader/presentation/screens/reader_screen.dart';
 import 'package:share_plus/share_plus.dart';
 
@@ -15,7 +16,6 @@ class QuotesScreen extends ConsumerStatefulWidget {
 class _QuotesScreenState extends ConsumerState<QuotesScreen> {
   List<Map<String, dynamic>> _quotes = [];
   bool _isLoading = true;
-  final Map<int, BookEntity> _booksCache = {};
 
   @override
   void initState() {
@@ -24,30 +24,26 @@ class _QuotesScreenState extends ConsumerState<QuotesScreen> {
   }
 
   Future<void> _loadQuotes() async {
+    final repo = ref.read(bookRepositoryProvider);
     try {
-      // 1. Получаем сырые данные из БД
-      final rawQuotes = await DatabaseHelper.instance.getQuotesWithDetails();
-      final quotesWithBooks = <Map<String, dynamic>>[];
+      final List<Map<String, dynamic>> quotesWithBooks = [];
+      final allBooks = await repo.getBooks();
 
-      for (final rawData in rawQuotes) {
-        final bookId = rawData['book_id'] as int;
-
-        // 2. Получаем объект книги (из кэша или БД)
-        BookEntity? book;
-        if (_booksCache.containsKey(bookId)) {
-          book = _booksCache[bookId];
-        } else {
-          book = await DatabaseHelper.instance.getBookById(bookId);
-          if (book != null) _booksCache[bookId] = book;
-        }
-
-        if (book != null) {
+      for (final book in allBooks) {
+        final qts = await repo.getQuotes(book.id);
+        for (final pos in qts) {
           quotesWithBooks.add({
-            'quote': rawData, // Вся строка из таблицы quotes
+            'quote': pos,
             'book': book,
           });
         }
       }
+
+      quotesWithBooks.sort((a, b) {
+        final bookA = a['book'] as BookEntity;
+        final bookB = b['book'] as BookEntity;
+        return bookA.title.compareTo(bookB.title);
+      });
 
       if (mounted) {
         setState(() {
@@ -61,39 +57,41 @@ class _QuotesScreenState extends ConsumerState<QuotesScreen> {
     }
   }
 
-  void _goToQuote(Map<String, dynamic> quoteData) async {
-    final quoteMap = quoteData['quote'];
+  Future<void> _goToQuote(Map<String, dynamic> quoteData) async {
+    final repo = ref.read(bookRepositoryProvider);
+    final pos = quoteData['quote'] as ReadingPosition;
     final book = quoteData['book'] as BookEntity;
 
-    // Важно: проверяем типы данных, SQLite может вернуть int вместо double
-    final int chapterIndex = (quoteMap['chapter_index'] as num).toInt();
-    final double scrollPosition = (quoteMap['position'] as num).toDouble();
+    await repo.updateReadingStatus(
+      book.id,
+      pos.chapterIndex.toInt(),
+      pos.position,
+    );
 
-    // Обновляем прогресс книги, чтобы ридер открылся правильно
-    await DatabaseHelper.instance.updatePosition(book.id, chapterIndex, scrollPosition);
+    final updatedBook = book.copyWith(
+      progress: pos.chapterIndex.toInt(),
+      position: pos.position,
+    );
 
     if (!mounted) return;
 
-    final updatedBook = book.copyWith(
-      progress: chapterIndex,
-      position: scrollPosition,
-    );
-
-    Navigator.push(
+    await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => ReaderScreen(book: updatedBook),
       ),
-    ).then((_) => _loadQuotes());
+    );
+
+    _loadQuotes();
   }
 
   void _shareQuote(Map<String, dynamic> quoteData) {
-    final quote = quoteData['quote'];
+    final pos = quoteData['quote'] as ReadingPosition;
     final book = quoteData['book'] as BookEntity;
-    final quoteText = quote['quote_text'] as String?;
-    final comment = quote['comment'] as String?;
+    final quoteText = pos.selectedText;
+    final comment = pos.comment;
 
-    if (quoteText != null) {
+    if (quoteText != null && quoteText.isNotEmpty) {
       String shareText = '«$quoteText»\n— ${book.author}, "${book.title}"';
       if (comment != null && comment.isNotEmpty) {
         shareText += '\n\nКомментарий: $comment';
@@ -103,14 +101,17 @@ class _QuotesScreenState extends ConsumerState<QuotesScreen> {
   }
 
   Future<void> _deleteQuote(Map<String, dynamic> quoteData) async {
-    final quote = quoteData['quote'];
-    final int quoteId = quote['id'];
+    final repo = ref.read(bookRepositoryProvider);
+    final pos = quoteData['quote'] as ReadingPosition;
+
+    if (pos.id == null) return;
 
     final result = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFFEDE7D9),
         title: const Text('Удалить цитату?', style: TextStyle(color: Color(0xFF4E342E))),
+        content: const Text('Вы уверены, что хотите удалить эту цитату?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -125,22 +126,24 @@ class _QuotesScreenState extends ConsumerState<QuotesScreen> {
     );
 
     if (result == true) {
-      await DatabaseHelper.instance.deleteQuoteById(quoteId);
+      await repo.deleteQuote(pos.id!);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Цитата удалена'), backgroundColor: Color(0xFF8D6E63)),
+          const SnackBar(
+            content: Text('Цитата удалена'),
+            backgroundColor: Color(0xFF8D6E63),
+          ),
         );
       }
-      _loadQuotes();
+      await _loadQuotes();
     }
   }
 
   Widget _buildQuoteItem(Map<String, dynamic> quoteData) {
-    final quote = quoteData['quote'];
-    final quoteText = quote['quote_text'] as String? ?? '';
-    final comment = quote['comment'] as String? ?? '';
-    final double scrollPercent = (quote['position'] as num?)?.toDouble() ?? 0.0;
-    final int chapter = (quote['chapter_index'] as num?)?.toInt() ?? 0;
+    final pos = quoteData['quote'] as ReadingPosition;
+    final book = quoteData['book'] as BookEntity;
+    final quoteText = pos.selectedText ?? '';
+    final comment = pos.comment ?? '';
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 6.0),
@@ -148,6 +151,13 @@ class _QuotesScreenState extends ConsumerState<QuotesScreen> {
         color: const Color(0xFFF5F1EB),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: const Color(0xFFD7CCC8)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: ListTile(
         leading: const Icon(Icons.format_quote, color: Color(0xFF7B5E57)),
@@ -157,7 +167,6 @@ class _QuotesScreenState extends ConsumerState<QuotesScreen> {
             color: Color(0xFF4E342E),
             fontSize: 14,
             fontStyle: FontStyle.italic,
-            fontFamily: 'serif',
           ),
           maxLines: 4,
           overflow: TextOverflow.ellipsis,
@@ -168,10 +177,13 @@ class _QuotesScreenState extends ConsumerState<QuotesScreen> {
             if (comment.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(top: 4.0),
-                child: Text(comment, style: const TextStyle(color: Color(0xFF6D4C41), fontSize: 12)),
+                child: Text(
+                  comment,
+                  style: const TextStyle(color: Color(0xFF6D4C41), fontSize: 12),
+                ),
               ),
             Text(
-              'Глава ${chapter + 1} • ${(scrollPercent * 100).toInt()}%',
+              '${book.title} • Глава ${pos.chapterIndex.toInt() + 1} • ${(pos.position * 100).toInt()}%',
               style: const TextStyle(color: Color(0xFF8D6E63), fontSize: 11),
             ),
           ],
@@ -203,27 +215,45 @@ class _QuotesScreenState extends ConsumerState<QuotesScreen> {
       backgroundColor: const Color(0xFFF8F4F0),
       appBar: AppBar(
         backgroundColor: const Color(0xFFBCAAA4),
-        title: const Text('Мои цитаты', style: TextStyle(color: Color(0xFF4E342E))),
+        title: const Text(
+          'Мои цитаты',
+          style: TextStyle(color: Color(0xFF4E342E), fontWeight: FontWeight.bold),
+        ),
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : grouped.isEmpty
-          ? const Center(child: Text('Цитат пока нет'))
-          : ListView.builder(
-        itemCount: grouped.length,
-        itemBuilder: (context, index) {
-          final title = grouped.keys.elementAt(index);
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-                child: Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-              ),
-              ...grouped[title]!.map(_buildQuoteItem),
-            ],
-          );
-        },
+          ? const Center(
+        child: Text(
+          'Цитат пока нет',
+          style: TextStyle(color: Color(0xFF4E342E)),
+        ),
+      )
+          : RefreshIndicator(
+        onRefresh: _loadQuotes,
+        child: ListView.builder(
+          itemCount: grouped.length,
+          itemBuilder: (context, index) {
+            final title = grouped.keys.elementAt(index);
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                  child: Text(
+                    title,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                      color: Color(0xFF4E342E),
+                    ),
+                  ),
+                ),
+                ...grouped[title]!.map(_buildQuoteItem),
+              ],
+            );
+          },
+        ),
       ),
     );
   }

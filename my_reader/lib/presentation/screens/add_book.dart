@@ -7,7 +7,7 @@ import 'package:xml/xml.dart' as xml;
 import 'package:path/path.dart' as path;
 import 'package:my_reader/domain/entities/book_entity.dart';
 import 'package:my_reader/domain/use_cases/add_book.dart';
-import 'package:my_reader/presentation/providers/book_provider.dart';
+import 'package:my_reader/presentation/providers/book_provider.dart'; // ДОБАВЛЕНО
 
 class AddBookScreen extends ConsumerStatefulWidget {
   final BookEntity? book;
@@ -68,7 +68,6 @@ class _AddBookScreenState extends ConsumerState<AddBookScreen> with SingleTicker
         setState(() {
           _errorMessage = 'Поддерживаются только EPUB, FB2, TXT файлы';
         });
-        print('Unsupported file extension: $extension');
         return;
       }
 
@@ -77,7 +76,6 @@ class _AddBookScreenState extends ConsumerState<AddBookScreen> with SingleTicker
         _fileFormat = extension.substring(1);
         _errorMessage = null;
       });
-      print('Selected file: $_filePath, Format: $_fileFormat');
 
       try {
         final file = File(_filePath!);
@@ -93,7 +91,6 @@ class _AddBookScreenState extends ConsumerState<AddBookScreen> with SingleTicker
             final subjects = epub.Schema?.Package?.Metadata?.Subjects;
             _categoryController.text = subjects?.isNotEmpty == true ? subjects!.first : 'Fiction';
           }
-          print('EPUB parsed - Title: ${_titleController.text}, Author: ${_authorController.text}, Genre: ${_categoryController.text}');
         } else if (_fileFormat == 'fb2') {
           final content = await file.readAsString();
           final document = xml.XmlDocument.parse(content);
@@ -113,7 +110,6 @@ class _AddBookScreenState extends ConsumerState<AddBookScreen> with SingleTicker
               _categoryController.text = titleInfo.findElements('genre').firstOrNull?.text ?? 'Fiction';
             }
           }
-          print('FB2 parsed - Title: ${_titleController.text}, Author: ${_authorController.text}, Genre: ${_categoryController.text}');
         } else if (_fileFormat == 'txt') {
           if (_titleController.text.isEmpty) {
             _titleController.text = path.basenameWithoutExtension(_filePath!);
@@ -121,22 +117,17 @@ class _AddBookScreenState extends ConsumerState<AddBookScreen> with SingleTicker
           if (_categoryController.text.isEmpty) {
             _categoryController.text = 'Text';
           }
-          print('TXT parsed - Title: ${_titleController.text}, Genre: ${_categoryController.text}');
         }
       } catch (e) {
         setState(() {
           _errorMessage = 'Ошибка парсинга файла: $e';
         });
-        print('Error parsing file: $e');
       }
     } else {
       setState(() {
         _errorMessage = 'Файл не выбран';
       });
-      print('No file selected');
     }
-
-
   }
 
   Future<void> _saveBook() async {
@@ -152,13 +143,11 @@ class _AddBookScreenState extends ConsumerState<AddBookScreen> with SingleTicker
     }
 
     final repo = ref.read(bookRepositoryProvider);
-    // AddBook - это use case, убедись, что он принимает обновленный репозиторий
     final addBookUseCase = AddBook(repo);
 
     try {
       if (_isEditMode) {
-        // КРИТИЧНО: Передаем текущую позицию, чтобы не сбросить прогресс
-        final book = BookEntity(
+        final updatedBook = BookEntity(
           id: widget.book!.id,
           title: _titleController.text.trim(),
           author: _authorController.text.trim(),
@@ -166,14 +155,12 @@ class _AddBookScreenState extends ConsumerState<AddBookScreen> with SingleTicker
           format: _fileFormat ?? widget.book!.format,
           coverPath: widget.book?.coverPath,
           progress: widget.book?.progress ?? 0,
-          position: widget.book?.position ?? 0.0, // СОХРАНЯЕМ ПОЗИЦИЮ
+          position: widget.book?.position ?? 0.0,
           category: _categoryController.text.trim().isEmpty ? null : _categoryController.text.trim(),
         );
 
-        await repo.databaseHelper.insertBook(book); // insertBook в режиме replace работает как update
-        ref.invalidate(getBooksProvider);
+        await repo.databaseHelper.insertBook(updatedBook);
       } else {
-        // Создание новой книги через UseCase
         await addBookUseCase(
           filePath: _filePath!,
           title: _titleController.text.trim(),
@@ -182,8 +169,15 @@ class _AddBookScreenState extends ConsumerState<AddBookScreen> with SingleTicker
         );
       }
 
+      // ИСПРАВЛЕНО: Инвалидируем ВСЕ провайдеры книг
+      ref.invalidate(getBooksProvider(null));
+      ref.invalidate(getAllBooksProvider);
+
+      // ИСПРАВЛЕНО: Добавляем принудительное обновление категорий
+      ref.invalidate(getCategoriesProvider);
+
       if (mounted) {
-        // Возвращаем true, чтобы LibraryScreen знал, что нужно обновить список
+        // ИСПРАВЛЕНО: Возвращаем true, а не просто закрываем
         Navigator.pop(context, true);
       }
     } catch (e) {
@@ -194,7 +188,6 @@ class _AddBookScreenState extends ConsumerState<AddBookScreen> with SingleTicker
     }
   }
 
-  // Валидатор для обязательных полей
   String? _requiredValidator(String? value) {
     if (value == null || value.trim().isEmpty) {
       return 'Это поле обязательно для заполнения';
@@ -221,7 +214,8 @@ class _AddBookScreenState extends ConsumerState<AddBookScreen> with SingleTicker
           _isEditMode ? 'Редактировать книгу' : 'Добавить книгу',
           style: const TextStyle(
             color: Color(0xFF4E342E),
-            fontWeight: FontWeight.w600,),
+            fontWeight: FontWeight.w600,
+          ),
         ),
         iconTheme: const IconThemeData(color: Color(0xFF4E342E)),
       ),

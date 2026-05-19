@@ -26,7 +26,6 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
   @override
   void initState() {
     super.initState();
-    _loadCategories();
   }
 
   Future<void> _loadCategories() async {
@@ -56,6 +55,8 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
     // Инвалидируем все провайдеры книг
     ref.invalidate(getBooksProvider(_selectedCategory));
     ref.invalidate(getBooksProvider(null));
+    ref.invalidate(getAllBooksProvider);
+    ref.invalidate(getCategoriesProvider);
     await _loadCategories();
   }
 
@@ -180,7 +181,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final booksAsync = ref.watch(getBooksProvider(_selectedCategory));
+    final booksAsync = ref.watch(getAllBooksProvider);
 
     return Scaffold(
       backgroundColor: const Color(0xFFEDE7D9),
@@ -249,37 +250,16 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
               Navigator.pop(context);
               final result = await Navigator.push(
                 context,
-                PageRouteBuilder(
-                  pageBuilder: (context, animation, secondaryAnimation) => const AddBookScreen(),
-                  transitionsBuilder: (context, animation, secondaryAnimation, child) {
-                    const begin = Offset(0.0, 1.0);
-                    const end = Offset.zero;
-                    const curve = Curves.easeInOut;
-                    final tween = Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
-                    return SlideTransition(
-                      position: animation.drive(tween),
-                      child: FadeTransition(
-                        opacity: animation,
-                        child: child,
-                      ),
-                    );
-                  },
-                  transitionDuration: const Duration(milliseconds: 300),
-                ),
+                MaterialPageRoute(builder: (context) => const AddBookScreen()),
               );
-
-              if (result is Map && result['result'] == true) {
+              if (result == true) {
                 await _refreshData();
-
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: const Text('Книга успешно добавлена'),
-                      backgroundColor: const Color(0xFF8D6E63),
+                    const SnackBar(
+                      content: Text('Книга успешно добавлена'),
+                      backgroundColor: Color(0xFF8D6E63),
                       behavior: SnackBarBehavior.floating,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
                     ),
                   );
                 }
@@ -352,12 +332,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
   }
 
   Widget _buildSearchAndFilter() {
-    // Убедимся, что выбранная категория существует в списке
-    final validSelectedCategory = _categories.contains(_selectedCategory == null
-        ? 'Все категории'
-        : _selectedCategory)
-        ? _selectedCategory
-        : null;
+    final categoriesAsync = ref.watch(getCategoriesProvider);
 
     return Padding(
       padding: const EdgeInsets.all(16.0),
@@ -367,7 +342,9 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
             controller: _searchController,
             focusNode: _searchFocusNode,
             decoration: const InputDecoration(
-              labelText: 'Поиск по названию',
+              hintText: 'Поиск по названию...',
+              hintStyle: TextStyle(color: Color(0xFF8D6E63)),
+              labelText: 'Поиск',
               labelStyle: TextStyle(color: Color(0xFF4E342E)),
               border: OutlineInputBorder(
                 borderSide: BorderSide(color: Color(0xFF7B5E57)),
@@ -378,41 +355,60 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
               focusedBorder: OutlineInputBorder(
                 borderSide: BorderSide(color: Color(0xFF4E342E)),
               ),
+              prefixIcon: Icon(Icons.search, color: Color(0xFF7B5E57)),
             ),
             style: const TextStyle(color: Color(0xFF4E342E)),
-            autofocus: false,
             onChanged: (value) {
               setState(() {
                 _searchQuery = value;
               });
             },
-            onTap: () {
-              // Опционально: автоматически фокусироваться только при явном тапе
-              _searchFocusNode.requestFocus();
-            },
           ),
           const SizedBox(height: 16),
-          DropdownButton<String?>(
-            hint: const Text(
-              'Выберите категорию',
-              style: TextStyle(color: Color(0xFF4E342E)),
-            ),
-            value: validSelectedCategory,
-            isExpanded: true,
-            items: _categories
-                .map((category) => DropdownMenuItem(
-              value: category == 'Все категории' ? null : category,
-              child: Text(
-                category,
-                style: const TextStyle(color: Color(0xFF4E342E)),
-              ),
-            ))
-                .toList(),
-            onChanged: (value) {
-              setState(() {
-                _selectedCategory = value;
-              });
+
+          // ИСПРАВЛЕНО: Используем провайдер для категорий
+          categoriesAsync.when(
+            data: (categories) {
+              final displayCategories = ['Все категории', ...categories];
+              return DropdownButton<String?>(
+                hint: const Text(
+                  'Выберите категорию',
+                  style: TextStyle(color: Color(0xFF4E342E)),
+                ),
+                value: _selectedCategory,
+                isExpanded: true,
+                underline: Container(
+                  height: 1,
+                  color: const Color(0xFFD7CCC8),
+                ),
+                items: displayCategories
+                    .map((category) => DropdownMenuItem(
+                  value: category == 'Все категории' ? null : category,
+                  child: Text(
+                    category,
+                    style: const TextStyle(color: Color(0xFF4E342E)),
+                  ),
+                ))
+                    .toList(),
+                onChanged: (value) {
+                  setState(() {
+                    _selectedCategory = value;
+                  });
+                  // Обновляем список книг при смене категории
+                  ref.invalidate(getBooksProvider(_selectedCategory));
+                },
+              );
             },
+            loading: () => const Center(
+              child: SizedBox(
+                height: 40,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            ),
+            error: (error, stack) => Text(
+              'Ошибка загрузки категорий: $error',
+              style: const TextStyle(color: Colors.red),
+            ),
           ),
         ],
       ),
@@ -526,18 +522,6 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
     );
   }
 
-  Widget _buildDefaultCover(BookEntity book) {
-    return Container(
-      width: 50,
-      height: 70,
-      color: Colors.brown[300],
-      child: Icon(
-        Icons.book,
-        color: Colors.white,
-        size: 30,
-      ),
-    );
-  }
 
   Widget _buildLoadingState() {
     return const Center(

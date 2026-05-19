@@ -12,10 +12,8 @@ class BookRepository {
   BookRepository(this.databaseHelper);
 
   Future<List<BookEntity>> getBooks([String? category]) async {
-    // В DatabaseHelper мы используем фильтрацию на уровне получения списка,
-    // если метод getBooksByCategory отсутствует, фильтруем полученный список:
     final allBooks = await databaseHelper.getBooks();
-    if (category == null) return allBooks;
+    if (category == null || category.isEmpty) return allBooks;
     return allBooks.where((book) => book.category == category).toList();
   }
 
@@ -40,7 +38,7 @@ class BookRepository {
 
         final metadata = epubBook.Schema?.Package?.Metadata;
         if (categoryOverride == null && metadata?.Subjects != null && metadata!.Subjects!.isNotEmpty) {
-          category = metadata.Subjects!.first; // Берем первый тег как основную категорию
+          category = metadata.Subjects!.first;
         }
       } catch (e) {
         print('Error reading EPUB: $e');
@@ -76,14 +74,13 @@ class BookRepository {
       format: format.toUpperCase(),
       coverPath: null,
       progress: 0,
-      position: 0.0, // Добавлено поле позиции
+      position: 0.0,
       category: category,
     );
 
     return await databaseHelper.insertBook(book);
   }
 
-  // Обновляем позицию чтения (используется при выходе из ридера)
   Future<void> updateReadingStatus(int bookId, int chapterIndex, double positionPercent) async {
     await databaseHelper.updatePosition(bookId, chapterIndex, positionPercent);
   }
@@ -98,7 +95,6 @@ class BookRepository {
 
   // ЗАКЛАДКИ
   Future<int> addBookmark(int bookId, ReadingPosition position, String note) async {
-    // Используем обновленный метод, который принимает объект позиции целиком
     return await databaseHelper.addBookmarkWithPosition(bookId, position, note);
   }
 

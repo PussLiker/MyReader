@@ -14,12 +14,8 @@ class BookmarksScreen extends ConsumerStatefulWidget {
 }
 
 class _BookmarksScreenState extends ConsumerState<BookmarksScreen> {
-  // Возвращаем структуру Map для хранения сырых данных и объектов книг
   List<Map<String, dynamic>> _bookmarks = [];
   bool _isLoading = true;
-  final Map<int, BookEntity> _booksCache = {};
-
-
 
   @override
   void initState() {
@@ -27,7 +23,6 @@ class _BookmarksScreenState extends ConsumerState<BookmarksScreen> {
     _loadBookmarks();
   }
 
-  // --- ЛОГИКА ЗАГРУЗКИ (Полная версия) ---
   Future<void> _loadBookmarks() async {
     final repo = ref.read(bookRepositoryProvider);
     try {
@@ -35,51 +30,44 @@ class _BookmarksScreenState extends ConsumerState<BookmarksScreen> {
       final allBooks = await repo.getBooks();
 
       for (final book in allBooks) {
-        // Получаем типизированные объекты ReadingPosition из репозитория
         final bks = await repo.getBookmarks(book.id);
-        final qts = await repo.getQuotes(book.id);
-        final positions = [...bks, ...qts];
-
-        for (final pos in positions) {
+        for (final pos in bks) {
           bookmarksWithBooks.add({
-            'bookmark': pos, // Теперь это объект ReadingPosition
+            'bookmark': pos,
             'book': book,
           });
         }
       }
 
-      // Сортировка по названию книги
       bookmarksWithBooks.sort((a, b) {
         final bookA = a['book'] as BookEntity;
         final bookB = b['book'] as BookEntity;
         return bookA.title.compareTo(bookB.title);
       });
 
-      setState(() {
-        _bookmarks = bookmarksWithBooks;
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _bookmarks = bookmarksWithBooks;
+          _isLoading = false;
+        });
+      }
     } catch (e) {
       debugPrint('Error loading bookmarks: $e');
-      setState(() => _isLoading = false);
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  // --- ЛОГИКА ПЕРЕХОДА ---
-  void _goToBookmark(Map<String, dynamic> bookmarkData) async {
+  Future<void> _goToBookmark(Map<String, dynamic> bookmarkData) async {
     final repo = ref.read(bookRepositoryProvider);
     final pos = bookmarkData['bookmark'] as ReadingPosition;
     final book = bookmarkData['book'] as BookEntity;
 
-
-    // 1. Обновляем позицию в базе данных перед переходом
     await repo.updateReadingStatus(
       book.id,
       pos.chapterIndex.toInt(),
-      pos.position, // ИСПОЛЬЗУЕМ position (0.0-1.0) вместо charOffset
+      pos.position,
     );
 
-    // 2. Создаем обновленный объект книги
     final updatedBook = book.copyWith(
       progress: pos.chapterIndex.toInt(),
       position: pos.position,
@@ -87,16 +75,16 @@ class _BookmarksScreenState extends ConsumerState<BookmarksScreen> {
 
     if (!mounted) return;
 
-    // 3. Летим в ридер
-    Navigator.push(
+    await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => ReaderScreen(book: updatedBook),
       ),
-    ).then((_) => _loadBookmarks());
+    );
+
+    _loadBookmarks();
   }
 
-  // --- ЛОГИКА УДАЛЕНИЯ  ---
   Future<void> _deleteBookmark(Map<String, dynamic> bookmarkData) async {
     final repo = ref.read(bookRepositoryProvider);
     final pos = bookmarkData['bookmark'] as ReadingPosition;
@@ -110,10 +98,13 @@ class _BookmarksScreenState extends ConsumerState<BookmarksScreen> {
         title: const Text('Удалить?', style: TextStyle(color: Color(0xFF4E342E))),
         content: const Text('Удалить эту метку навсегда?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Отмена')),
           TextButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Удалить', style: TextStyle(color: Colors.red))
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Отмена'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Удалить', style: TextStyle(color: Colors.red)),
           ),
         ],
       ),
@@ -121,13 +112,13 @@ class _BookmarksScreenState extends ConsumerState<BookmarksScreen> {
 
     if (result == true) {
       await repo.deleteBookmark(pos.id!);
-      await _loadBookmarks(); // Обновляем список на экране
+      await _loadBookmarks();
     }
   }
 
-  // --- ВЕРСТКА ЭЛЕМЕНТА  ---
   Widget _buildBookmarkItem(Map<String, dynamic> bookmarkData) {
-    final pos = bookmarkData['bookmark'];
+    final pos = bookmarkData['bookmark'] as ReadingPosition;
+    final book = bookmarkData['book'] as BookEntity;
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 6.0),
@@ -149,13 +140,13 @@ class _BookmarksScreenState extends ConsumerState<BookmarksScreen> {
           child: Icon(Icons.bookmark, color: Color(0xFF7B5E57), size: 20),
         ),
         title: Text(
-          pos.selectedText.isEmpty ? "Закладка" : pos.selectedText,
+          pos.selectedText?.isNotEmpty == true ? pos.selectedText! : "Закладка",
           style: const TextStyle(color: Color(0xFF4E342E), fontSize: 14),
           maxLines: 3,
           overflow: TextOverflow.ellipsis,
         ),
         subtitle: Text(
-          'Глава ${pos.chapterIndex.toInt() + 1}',
+          '${book.title} • Глава ${pos.chapterIndex.toInt() + 1}',
           style: const TextStyle(color: Color(0xFF8D6E63), fontSize: 11),
         ),
         trailing: PopupMenuButton<String>(
@@ -163,14 +154,13 @@ class _BookmarksScreenState extends ConsumerState<BookmarksScreen> {
           onSelected: (val) {
             if (val == 'delete') {
               _deleteBookmark(bookmarkData);
-            } else if (val == 'share') {
-              final pos = bookmarkData['bookmark'];
-              final book = bookmarkData['book'] as BookEntity;
-              Share.share('"${pos.selectedText}" — из книги ${book.title}');
+            } else if (val == 'share' && pos.selectedText != null) {
+              Share.share('"${pos.selectedText}" — из книги ${book.title} (${book.author})');
             }
           },
           itemBuilder: (context) => [
-            const PopupMenuItem(value: 'share', child: Text('Поделиться')),
+            if (pos.selectedText != null && pos.selectedText!.isNotEmpty)
+              const PopupMenuItem(value: 'share', child: Text('Поделиться')),
             const PopupMenuItem(value: 'delete', child: Text('Удалить')),
           ],
         ),
@@ -179,7 +169,6 @@ class _BookmarksScreenState extends ConsumerState<BookmarksScreen> {
     );
   }
 
-  // --- ГРУППИРОВКА И СПИСОК ---
   @override
   Widget build(BuildContext context) {
     final grouped = <String, List<Map<String, dynamic>>>{};
@@ -192,12 +181,15 @@ class _BookmarksScreenState extends ConsumerState<BookmarksScreen> {
       backgroundColor: const Color(0xFFF8F4F0),
       appBar: AppBar(
         backgroundColor: const Color(0xFFBCAAA4),
-        title: const Text('Мои закладки', style: TextStyle(color: Color(0xFF4E342E), fontWeight: FontWeight.bold)),
+        title: const Text(
+          'Мои закладки',
+          style: TextStyle(color: Color(0xFF4E342E), fontWeight: FontWeight.bold),
+        ),
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : grouped.isEmpty
-          ? _buildEmpty()
+          ? const Center(child: Text("Закладок нет"))
           : RefreshIndicator(
         onRefresh: _loadBookmarks,
         child: ListView.builder(
@@ -210,7 +202,14 @@ class _BookmarksScreenState extends ConsumerState<BookmarksScreen> {
               children: [
                 Padding(
                   padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-                  child: Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                  child: Text(
+                    title,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                      color: Color(0xFF4E342E),
+                    ),
+                  ),
                 ),
                 ...items.map(_buildBookmarkItem),
               ],
@@ -220,6 +219,4 @@ class _BookmarksScreenState extends ConsumerState<BookmarksScreen> {
       ),
     );
   }
-
-  Widget _buildEmpty() => const Center(child: Text("Закладок нет"));
 }
