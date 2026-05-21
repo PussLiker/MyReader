@@ -1,4 +1,5 @@
 import 'dart:async';
+import '../../domain/entities/Selection.dart';
 import '../../domain/entities/reader_settings.dart';
 import '../../domain/use_cases/settings_service.dart';
 import '../providers/book_provider.dart';
@@ -42,6 +43,12 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   Timer? _savePositionTimer;
   late ReaderSettings _readerSettings;
   double _currentChapterProgress = 0.0; // Процент внутри главы (0.0 - 1.0)
+  Selection? activeSelection;
+  List<Highlight> highlights = [];
+  bool _hasActiveSelection = false;
+  Key _textKey = UniqueKey();
+  final GlobalKey _richTextKey = GlobalKey();
+
 
   void _scrollListener() {
     if (_scrollController.hasClients) {
@@ -257,6 +264,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
         _bookmarks = bookmarks;
         _quotes = quotes;
         _indexedMarks = newIndexedMarks;
+
+        _textKey = UniqueKey();
       });
     } catch (e) {
       print('Error loading marks: $e');
@@ -523,8 +532,10 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
         _quotes = updatedQuotes;
         _isTextSelected = false;
         _showSelectionToolbar = false;
+
+        _refreshTextMarkers();
+        _textKey = UniqueKey();
       });
-      _refreshTextMarkers();
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1113,10 +1124,28 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
         color: const Color(0xFF4E342E),
       ),
       onSelectionChanged: (selection, cause) {
+        _selection = selection;
+
+        final isValid = selection.isValid && selection.start != selection.end;
+
+        if (!isValid) {
+          setState(() {
+            _isTextSelected = false;
+            _showSelectionToolbar = false;
+          });
+          return;
+        }
+
         setState(() {
-          _selection = selection;
-          _isTextSelected = selection.isValid && selection.start != selection.end;
-          _showSelectionToolbar = _isTextSelected;
+          _isTextSelected = true;
+        });
+
+        Future.delayed(const Duration(milliseconds: 80), () {
+          if (!mounted) return;
+
+          setState(() {
+            _showSelectionToolbar = true;
+          });
         });
       },
     );
@@ -1137,21 +1166,42 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                 controller: _scrollController,
                 padding: const EdgeInsets.fromLTRB(20, 16, 20, 80), // Нижний отступ под Toolbar
                 child: RepaintBoundary(
-                  child: SelectableText.rich(
+                  child: KeyedSubtree(
+                    key: _textKey,
+                    child: SelectableText.rich(
                     _buildTextWithHighlights(chapter.content),
                     style: TextStyle(
                       fontSize: 18.0,
                       height: _readerSettings.lineHeight,
                       color: const Color(0xFF4E342E),
                     ),
-                    onSelectionChanged: (selection, cause) {
-                      setState(() {
+                      onSelectionChanged: (selection, cause) {
                         _selection = selection;
-                        _isTextSelected = selection.isValid && selection.start != selection.end;
-                        _showSelectionToolbar = _isTextSelected;
-                      });
-                    },
+
+                        final isValid = selection.isValid && selection.start != selection.end;
+
+                        if (!isValid) {
+                          setState(() {
+                            _isTextSelected = false;
+                            _showSelectionToolbar = false;
+                          });
+                          return;
+                        }
+
+                        setState(() {
+                          _isTextSelected = true;
+                        });
+
+                        Future.delayed(const Duration(milliseconds: 80), () {
+                          if (!mounted) return;
+
+                          setState(() {
+                            _showSelectionToolbar = true;
+                          });
+                        });
+                      },
                   ),
+                  )
                 ),
               ),
             ),
@@ -1178,15 +1228,15 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   }
 
   TextSpan _buildTextWithHighlights(String text) {
-    // Просто берем уже готовый, отсортированный список для текущей главы из кэша
-    final currentChapterMarks = _indexedMarks[_currentChapterIndex.floor()] ?? [];
+    final currentChapterMarks =
+        _indexedMarks[_currentChapterIndex.floor()] ?? [];
 
-    // Делегируем работу сервису
     return TextTransformer.buildHighlightedSpan(
-        text,
-        currentChapterMarks,
-        _readerSettings,
-        _handleMarkTap);
+      text,
+      currentChapterMarks,
+      _readerSettings,
+      _handleMarkTap,
+    );
   }
 
   void _handleMarkTap(ReadingPosition mark) {
@@ -1332,6 +1382,87 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     );
   }
 
+  void _handleLongPress() {
+    if (!_selection.isValid || _selection.start == _selection.end) {
+      return;
+    }
+
+    final chapter = _currentChapter;
+    if (chapter == null) return;
+
+    final selectedText = chapter.content
+        .substring(_selection.start, _selection.end)
+        .trim();
+
+    if (selectedText.isEmpty) return;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFFEDE7D9),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFBCAAA4),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const SizedBox(height: 12),
+
+                Text(
+                  selectedText,
+                  style: const TextStyle(
+                    fontStyle: FontStyle.italic,
+                    color: Color(0xFF3E2F2B),
+                  ),
+                ),
+
+                const SizedBox(height: 16),
+
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () {
+                          Navigator.pop(context);
+                          _addBookmarkAtSelection();
+                        },
+                        child: const Text('Закладка'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF8D6E63),
+                        ),
+                        onPressed: () async {
+                          Navigator.pop(context);
+                          await _saveQuoteAtSelection();
+                        },
+                        child: const Text('Цитата'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Widget _buildContent() {
     if (_isLoading) return _buildLoading();
     if (_errorMessage.isNotEmpty) return _buildError();
@@ -1416,6 +1547,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
         ],
       ),
       body: GestureDetector(
+        behavior: HitTestBehavior.translucent,
         onTap: () {
           if (_showSelectionToolbar) {
             setState(() {
