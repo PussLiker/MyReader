@@ -1,59 +1,102 @@
 import 'package:flutter/material.dart';
 import '../entities/reading_position.dart';
-import '../entities/reader_settings.dart'; // Импортируй модель
+import '../entities/reader_settings.dart';
 
 class TextTransformer {
-  static TextSpan buildHighlightedSpan(String text,
+  static TextSpan buildHighlightedSpan(
+      String text,
       List<ReadingPosition> marks,
-      ReaderSettings settings,) {
-    // ИСПРАВЛЕНО: Используем settings.lineHeight вместо фиксированного 1.6
-    final TextStyle baseStyle = TextStyle(
+      ReaderSettings settings,
+      void Function(ReadingPosition mark)? onTapQuote,
+      ) {
+    final baseStyle = TextStyle(
       fontSize: settings.fontSize,
       fontFamily: settings.fontFamily,
-      height: settings.lineHeight, // <-- Теперь используется из настроек
-      color: const Color(0xFF4E342E),
-    );
-
-    final TextStyle highlightStyle = baseStyle.copyWith(
-      fontStyle: FontStyle.italic,
-      backgroundColor: const Color(0xFFE6D5B8).withOpacity(0.6),
-      color: const Color(0xFF4E342E),
+      height: settings.lineHeight,
+      color: const Color(0xFF3E2F2B),
     );
 
     if (marks.isEmpty) {
       return TextSpan(text: text, style: baseStyle);
     }
 
-    final spans = <TextSpan>[];
-    int currentPosition = 0;
+    final List<InlineSpan> spans = [];
+    int cursor = 0;
 
-    // Сортируем метки по charOffset
-    final sortedMarks = List<ReadingPosition>.from(marks)
+    final sorted = List<ReadingPosition>.from(marks)
       ..sort((a, b) => a.charOffset.compareTo(b.charOffset));
 
-    for (final position in sortedMarks) {
-      if (position.charOffset > currentPosition) {
+    for (final mark in sorted) {
+      final start = mark.charOffset;
+
+      if (start > cursor) {
         spans.add(TextSpan(
-          text: text.substring(currentPosition, position.charOffset),
+          text: text.substring(cursor, start),
           style: baseStyle,
         ));
       }
 
-      final selectedText = position.selectedText ?? '';
-      final textEnd = position.charOffset + selectedText.length;
-
-      if (textEnd <= text.length && selectedText.isNotEmpty) {
-        spans.add(TextSpan(
-          text: selectedText,
-          style: highlightStyle,
-        ));
+      final selected = mark.selectedText ?? '';
+      if (selected.isEmpty) {
+        cursor = start;
+        continue;
       }
-      currentPosition = textEnd;
+
+      final end = (start + selected.length).clamp(0, text.length);
+      final isQuote = mark.note != null && mark.note!.isNotEmpty;
+
+      spans.add(
+        WidgetSpan(
+          alignment: PlaceholderAlignment.middle,
+          child: GestureDetector(
+            onTap: () {
+              if (onTapQuote != null) {
+                onTapQuote(mark);
+              }
+            },
+            child: Container(
+              margin: const EdgeInsets.symmetric(vertical: 2),
+              padding: const EdgeInsets.symmetric(horizontal: 2),
+              decoration: BoxDecoration(
+                color: isQuote
+                    ? const Color(0xFFFFF3E0)
+                    : const Color(0xFFE8E0D1),
+                borderRadius: BorderRadius.circular(6),
+                border: Border(
+                  left: BorderSide(
+                    color: isQuote
+                        ? const Color(0xFFFF9800)
+                        : const Color(0xFF8D6E63),
+                    width: 3,
+                  ),
+                ),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Color(0x11000000),
+                    blurRadius: 2,
+                    offset: Offset(0, 1),
+                  ),
+                ],
+              ),
+              child: Text(
+                selected,
+                style: baseStyle.copyWith(
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      cursor = end;
     }
 
-    if (currentPosition < text.length) {
-      spans.add(
-          TextSpan(text: text.substring(currentPosition), style: baseStyle));
+    if (cursor < text.length) {
+      spans.add(TextSpan(
+        text: text.substring(cursor),
+        style: baseStyle,
+      ));
     }
 
     return TextSpan(children: spans);

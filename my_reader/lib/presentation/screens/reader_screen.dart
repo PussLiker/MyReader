@@ -15,6 +15,7 @@ import '../../domain/parsers/epub_parser.dart';
 import '../../domain/parsers/fb2_parser.dart';
 import '../../domain/use_cases/text_transformer.dart';
 import '../widgets/settings_panel.dart';
+import 'package:flutter/gestures.dart';
 
 class ReaderScreen extends ConsumerStatefulWidget {
   final BookEntity book;
@@ -623,16 +624,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   }
 
   void _shareQuote(String text) {
-    final shareText = '''
-      Цитата из книги "${widget.book.title}"
-      
-      "$text"
-      
-      Автор: ${widget.book.author}
-      Источник: ${widget.book.title}
-      
-      #цитата #чтение #книги #литература
-        '''.trim();
+    final shareText = '''      
+      "$text" – ${widget.book.author}. ${widget.book.title}.
+      '''.trim();
 
     Share.share(shareText);
   }
@@ -1188,9 +1182,155 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     final currentChapterMarks = _indexedMarks[_currentChapterIndex.floor()] ?? [];
 
     // Делегируем работу сервису
-    return TextTransformer.buildHighlightedSpan(text, currentChapterMarks, _readerSettings);
+    return TextTransformer.buildHighlightedSpan(
+        text,
+        currentChapterMarks,
+        _readerSettings,
+        _handleMarkTap);
   }
 
+  void _handleMarkTap(ReadingPosition mark) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return SafeArea(
+          child: Container(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(context).size.height * 0.45,
+            ),
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+            decoration: const BoxDecoration(
+              color: Color(0xFFEDE7D9),
+              borderRadius: BorderRadius.vertical(
+                top: Radius.circular(18),
+              ),
+            ),
+            child: Column(
+              children: [
+                // "ручка"
+                Container(
+                  width: 40,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFBCAAA4),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                ),
+
+                const Text(
+                  'Цитата',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF4E342E),
+                  ),
+                ),
+
+                const SizedBox(height: 12),
+
+                // ВАЖНО: вся прокручиваемая часть
+                Expanded(
+                  child: SingleChildScrollView(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // ЦИТАТА
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFD7CCC8),
+                            borderRadius: BorderRadius.circular(10),
+                            border: const Border(
+                              left: BorderSide(
+                                color: Color(0xFF8D6E63),
+                                width: 4,
+                              ),
+                            ),
+                          ),
+                          child: Text(
+                            mark.selectedText ?? '',
+                            style: const TextStyle(
+                              fontStyle: FontStyle.italic,
+                              color: Color(0xFF3E2F2B),
+                              height: 1.4,
+                            ),
+                          ),
+                        ),
+
+                        const SizedBox(height: 14),
+
+                        // КОММЕНТАРИЙ
+                        if ((mark.comment ?? '').trim().isNotEmpty) ...[
+                          const Text(
+                            'Комментарий',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF4E342E),
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF5EFE6),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Text(
+                              mark.comment!,
+                              style: const TextStyle(
+                                color: Color(0xFF4E342E),
+                                height: 1.3,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 14),
+                        ],
+
+                        // кнопки
+                        Row(
+                          children: [
+                            Expanded(
+                              child: OutlinedButton(
+                                onPressed: () => Navigator.pop(context),
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: const Color(0xFF7B5E57),
+                                  side: const BorderSide(color: Color(0xFF7B5E57)),
+                                ),
+                                child: const Text('Закрыть'),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: ElevatedButton(
+                                onPressed: () {
+                                  Navigator.pop(context);
+                                  _shareQuote(mark.selectedText ?? '');
+                                },
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFF8D6E63),
+                                  foregroundColor: Colors.white,
+                                ),
+                                child: const Text('Поделиться'),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
 
   Widget _buildContent() {
     if (_isLoading) return _buildLoading();
