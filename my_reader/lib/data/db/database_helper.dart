@@ -133,7 +133,8 @@ class DatabaseHelper {
     final db = await database;
     final authorId = await getAuthorId(book.author);
     final formatId = await getFormatId(book.format);
-    final categoryId = book.category != null ? await getCategoryId(book.category!) : null;
+    final categoryId =
+        book.category != null ? await getCategoryId(book.category!) : null;
 
     return await db.insert(
       'books',
@@ -191,7 +192,8 @@ class DatabaseHelper {
   }
 
   // --- Закладки ---
-  Future<int> addBookmarkWithPosition(int bookId, ReadingPosition pos, String note) async {
+  Future<int> addBookmarkWithPosition(
+      int bookId, ReadingPosition pos, String note) async {
     final db = await database;
     return await db.insert('bookmarks', {
       'book_id': bookId,
@@ -205,19 +207,23 @@ class DatabaseHelper {
 
   Future<List<ReadingPosition>> getBookmarksWithPosition(int bookId) async {
     final db = await database;
-    final maps = await db.query('bookmarks', where: 'book_id = ?', whereArgs: [bookId]);
-    return maps.map((m) => ReadingPosition(
-      id: m['id'] as int,
-      chapterIndex: (m['chapter_index'] as num).toDouble(),
-      position: (m['position'] as num? ?? 0.0).toDouble(),
-      charOffset: m['char_offset'] as int,
-      selectedText: m['selected_text'] as String?,
-      note: m['note'] as String?,
-    )).toList();
+    final maps =
+        await db.query('bookmarks', where: 'book_id = ?', whereArgs: [bookId]);
+    return maps
+        .map((m) => ReadingPosition(
+              id: m['id'] as int,
+              chapterIndex: (m['chapter_index'] as num).toDouble(),
+              position: (m['position'] as num? ?? 0.0).toDouble(),
+              charOffset: m['char_offset'] as int,
+              selectedText: m['quote_text'] as String?,
+              comment: m['comment'] as String?,
+            ))
+        .toList();
   }
 
   // --- Цитаты ---
-  Future<int> addQuoteWithPosition(int bookId, ReadingPosition pos, String text, String? comment) async {
+  Future<int> addQuoteWithPosition(
+      int bookId, ReadingPosition pos, String text, String? comment) async {
     final db = await database;
     return await db.insert('quotes', {
       'book_id': bookId,
@@ -229,17 +235,34 @@ class DatabaseHelper {
     });
   }
 
+  // --- Обновление комментария у существующей цитаты ---
+  Future<int> updateQuoteComment(int id, String? comment) async {
+    print("--- DB UPDATE --- ID: $id, COMMENT: $comment");
+    final db = await instance.database;
+    final result = await db.update(
+      'quotes',
+      {'comment': comment},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+    print("DB result (rows affected): $result");
+    return result;
+  }
+
   Future<List<ReadingPosition>> getQuotesWithPosition(int bookId) async {
     final db = await database;
-    final maps = await db.query('quotes', where: 'book_id = ?', whereArgs: [bookId]);
-    return maps.map((m) => ReadingPosition(
-      id: m['id'] as int,
-      chapterIndex: (m['chapter_index'] as num).toDouble(),
-      position: (m['position'] as num? ?? 0.0).toDouble(),
-      charOffset: m['char_offset'] as int,
-      selectedText: m['quote_text'] as String?,
-      comment: m['comment'] as String?,
-    )).toList();
+    final maps =
+        await db.query('quotes', where: 'book_id = ?', whereArgs: [bookId]);
+    return maps
+        .map((m) => ReadingPosition(
+              id: m['id'] as int,
+              chapterIndex: (m['chapter_index'] as num).toDouble(),
+              position: (m['position'] as num? ?? 0.0).toDouble(),
+              charOffset: m['char_offset'] as int,
+              selectedText: m['quote_text'] as String?,
+              comment: m['comment'] as String?,
+            ))
+        .toList();
   }
 
   // --- Вспомогательные методы ---
@@ -259,14 +282,16 @@ class DatabaseHelper {
 
   Future<int> getFormatId(String name) async {
     final db = await database;
-    final maps = await db.query('formats', where: 'name = ?', whereArgs: [name.toUpperCase()]);
+    final maps = await db
+        .query('formats', where: 'name = ?', whereArgs: [name.toUpperCase()]);
     if (maps.isNotEmpty) return maps.first['id'] as int;
     throw Exception('Format $name not found');
   }
 
   Future<int> getCategoryId(String name) async {
     final db = await database;
-    final maps = await db.query('categories', where: 'name = ?', whereArgs: [name]);
+    final maps =
+        await db.query('categories', where: 'name = ?', whereArgs: [name]);
     if (maps.isNotEmpty) return maps.first['id'] as int;
     return await db.insert('categories', {'name': name});
   }
@@ -276,7 +301,8 @@ class DatabaseHelper {
     await db.delete('bookmarks', where: 'book_id = ?', whereArgs: [bookId]);
     await db.delete('quotes', where: 'book_id = ?', whereArgs: [bookId]);
     await db.delete('books', where: 'id = ?', whereArgs: [bookId]);
-    await db.rawDelete('DELETE FROM categories WHERE id NOT IN (SELECT DISTINCT category_id FROM books WHERE category_id IS NOT NULL)');
+    await db.rawDelete(
+        'DELETE FROM categories WHERE id NOT IN (SELECT DISTINCT category_id FROM books WHERE category_id IS NOT NULL)');
   }
 
   Future<void> deleteBookmarkById(int id) async {
@@ -310,7 +336,8 @@ class DatabaseHelper {
     final db = await database;
     final authorId = await getAuthorId(book.author);
     final formatId = await getFormatId(book.format);
-    final categoryId = book.category != null ? await getCategoryId(book.category!) : null;
+    final categoryId =
+        book.category != null ? await getCategoryId(book.category!) : null;
 
     return await db.update(
       'books',

@@ -6,6 +6,7 @@ class TextTransformer {
       String text,
       List<dynamic> marks,
       dynamic settings,
+      Function(dynamic) onQuoteTap, // Передаем callback для обработки клика
       ) {
     final TextStyle baseStyle = TextStyle(
       fontFamily: settings.fontFamily ?? 'Serif',
@@ -15,12 +16,9 @@ class TextTransformer {
     );
 
     if (marks.isEmpty) {
-      return [
-        Text(text, style: baseStyle)
-      ];
+      return [Text(text, style: baseStyle)];
     }
 
-    // Сортируем маркеры цитат по их положению в тексте
     final sortedMarks = List.from(marks)
       ..sort((a, b) => a.charOffset.compareTo(b.charOffset));
 
@@ -34,10 +32,8 @@ class TextTransformer {
       if (selectedText == null || selectedText.isEmpty) continue;
       final int markEnd = markStart + selectedText.length;
 
-      // Проверка на выход за границы (на всякий случай)
       if (markStart < currentIndex || markEnd > text.length) continue;
 
-      // 1. Добавляем обычный текст, который шел ДО цитаты
       if (markStart > currentIndex) {
         final String normalText = text.substring(currentIndex, markStart);
         if (normalText.trim().isNotEmpty) {
@@ -45,17 +41,19 @@ class TextTransformer {
         }
       }
 
-      // 2. Добавляем цитату в виде кастомной коробочки с индикатором
       final String quoteText = text.substring(markStart, markEnd);
+
+      // Добавляем коробочку с передачей параметров комментария и клика
       blocks.add(QuoteBlockWidget(
         text: quoteText,
         baseStyle: baseStyle,
+        currentComment: mark.comment, // Передаем текст текущей заметки
+        onTap: () => onQuoteTap(mark), // Передаем сам объект разметки при тапе
       ));
 
       currentIndex = markEnd;
     }
 
-    // 3. Добавляем оставшийся хвост текста ПОСЛЕ последней цитаты
     if (currentIndex < text.length) {
       final String trailingText = text.substring(currentIndex);
       if (trailingText.trim().isNotEmpty) {

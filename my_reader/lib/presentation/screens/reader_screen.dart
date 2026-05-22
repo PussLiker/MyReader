@@ -24,6 +24,7 @@ import 'package:flutter/gestures.dart';
 class ReaderScreen extends ConsumerStatefulWidget {
   final BookEntity book;
   final int? initialCharOffset;
+
   const ReaderScreen({required this.book, this.initialCharOffset, super.key});
 
   @override
@@ -52,14 +53,14 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   Key _textKey = UniqueKey();
   final GlobalKey _richTextKey = GlobalKey();
 
-
   void _scrollListener() {
     if (_scrollController.hasClients) {
       final max = _scrollController.position.maxScrollExtent;
       final current = _scrollController.offset;
       final newProgress = max > 0 ? (current / max) : 0.0;
 
-      if ((newProgress - _currentChapterProgress).abs() > 0.01) { // Оптимизация частоты обновлений
+      if ((newProgress - _currentChapterProgress).abs() > 0.01) {
+        // Оптимизация частоты обновлений
         setState(() {
           _currentChapterProgress = newProgress;
         });
@@ -91,8 +92,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
         await DatabaseHelper.instance.updatePosition(
             widget.book.id,
             _currentChapterIndex.toInt(), // Глава -> progress
-            percent                       // Процент -> position
-        );
+            percent // Процент -> position
+            );
       } catch (e) {
         print('Ошибка сохранения в БД: $e');
       }
@@ -145,14 +146,14 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
       final currentScroll = _scrollController.offset;
 
       setState(() {
-        _currentChapterProgress = maxScroll > 0 ? (currentScroll / maxScroll) : 0.0;
+        _currentChapterProgress =
+            maxScroll > 0 ? (currentScroll / maxScroll) : 0.0;
       });
 
       // Вызываем сохранение (оно у нас с Debounce, так что в БД не заспамит)
       _savePosition();
     }
   }
-
 
   // Оставляем один универсальный метод для индексации
   void _refreshTextMarkers() {
@@ -181,28 +182,39 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
       _readerSettings = await settingsService.loadSettings();
 
       // 1. Получаем данные из БД для сверки
-      final updatedBook = await DatabaseHelper.instance.getBookById(widget.book.id);
+      final updatedBook =
+          await DatabaseHelper.instance.getBookById(widget.book.id);
 
       // Определяем целевую главу (приоритет у данных из Navigator.push)
       double targetChapter = (widget.book.progress > 0
-          ? widget.book.progress
-          : (updatedBook?.progress ?? 0)).toDouble();
+              ? widget.book.progress
+              : (updatedBook?.progress ?? 0))
+          .toDouble();
 
       // Определяем целевой процент скролла
       final double targetPercent = widget.book.position > 0
           ? widget.book.position
           : (updatedBook?.position ?? 0.0);
 
-      final bookmarks = await DatabaseHelper.instance.getBookmarksWithPosition(widget.book.id);
-      final quotes = await DatabaseHelper.instance.getQuotesWithPosition(widget.book.id);
+      final bookmarks = await DatabaseHelper.instance
+          .getBookmarksWithPosition(widget.book.id);
+      final quotes =
+          await DatabaseHelper.instance.getQuotesWithPosition(widget.book.id);
 
       // 2. Парсинг контента
       List<ChapterEntity> chapters = [];
       switch (widget.book.format.toUpperCase()) {
-        case 'EPUB': chapters = await EpubParser().parseChapters(widget.book.path); break;
-        case 'FB2':  chapters = await Fb2Parser().parseChapters(widget.book.path); break;
-        case 'TXT':  chapters = await TxtParser().parseChapters(widget.book.path); break;
-        default: throw Exception('Неподдерживаемый формат');
+        case 'EPUB':
+          chapters = await EpubParser().parseChapters(widget.book.path);
+          break;
+        case 'FB2':
+          chapters = await Fb2Parser().parseChapters(widget.book.path);
+          break;
+        case 'TXT':
+          chapters = await TxtParser().parseChapters(widget.book.path);
+          break;
+        default:
+          throw Exception('Неподдерживаемый формат');
       }
 
       if (chapters.isEmpty) throw Exception('Книга пуста');
@@ -215,7 +227,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
         _quotes = quotes;
 
         // Защита от выхода за границы списка глав
-        _currentChapterIndex = targetChapter.clamp(0.0, (chapters.length - 1).toDouble());
+        _currentChapterIndex =
+            targetChapter.clamp(0.0, (chapters.length - 1).toDouble());
         _isLoading = false;
       });
 
@@ -230,7 +243,6 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
           _restoreScrollPosition(targetPercent);
         });
       }
-
     } catch (e) {
       print('ОШИБКА ЗАГРУЗКИ: $e');
       if (mounted) {
@@ -244,8 +256,10 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
 
   Future<void> _loadBookmarksAndQuotes() async {
     try {
-      final bookmarks = await DatabaseHelper.instance.getBookmarksWithPosition(widget.book.id);
-      final quotes = await DatabaseHelper.instance.getQuotesWithPosition(widget.book.id);
+      final bookmarks = await DatabaseHelper.instance
+          .getBookmarksWithPosition(widget.book.id);
+      final quotes =
+          await DatabaseHelper.instance.getQuotesWithPosition(widget.book.id);
 
       final allMarks = [...bookmarks, ...quotes];
       final Map<int, List<ReadingPosition>> newIndexedMarks = {};
@@ -282,13 +296,13 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     return _chapters[_currentChapterIndex.floor()];
   }
 
-
-
-  void _goToPosition(double chapterIndex, {double percent = 0.0, int charOffset = 0}) {
+  void _goToPosition(double chapterIndex,
+      {double percent = 0.0, int charOffset = 0}) {
     if (_chapters.isEmpty) return;
 
     setState(() {
-      _currentChapterIndex = chapterIndex.clamp(0.0, (_chapters.length - 1).toDouble());
+      _currentChapterIndex =
+          chapterIndex.clamp(0.0, (_chapters.length - 1).toDouble());
       _isLoading = false; // На случай если вызвали во время загрузки
     });
 
@@ -360,54 +374,55 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
               Expanded(
                 child: _chapters.isEmpty
                     ? const Center(
-                  child: Text(
-                    'Нет глав',
-                    style: TextStyle(color: Color(0xFF4E342E)),
-                  ),
-                )
+                        child: Text(
+                          'Нет глав',
+                          style: TextStyle(color: Color(0xFF4E342E)),
+                        ),
+                      )
                     : ListView.builder(
-                  itemCount: _chapters.length,
-                  itemBuilder: (context, index) {
-                    final chapter = _chapters[index];
-                    return ListTile(
-                      leading: Container(
-                        width: 30,
-                        height: 30,
-                        decoration: BoxDecoration(
-                          color: index == _currentChapterIndex.floor()
-                              ? const Color(0xFF8D6E63)
-                              : const Color(0xFFBCAAA4),
-                          shape: BoxShape.circle,
-                        ),
-                        child: Center(
-                          child: Text(
-                            '${index + 1}',
-                            style: const TextStyle(
-                              color: Color(0xFF4E342E),
-                              fontWeight: FontWeight.bold,
-                              fontSize: 12,
+                        itemCount: _chapters.length,
+                        itemBuilder: (context, index) {
+                          final chapter = _chapters[index];
+                          return ListTile(
+                            leading: Container(
+                              width: 30,
+                              height: 30,
+                              decoration: BoxDecoration(
+                                color: index == _currentChapterIndex.floor()
+                                    ? const Color(0xFF8D6E63)
+                                    : const Color(0xFFBCAAA4),
+                                shape: BoxShape.circle,
+                              ),
+                              child: Center(
+                                child: Text(
+                                  '${index + 1}',
+                                  style: const TextStyle(
+                                    color: Color(0xFF4E342E),
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ),
                             ),
-                          ),
-                        ),
+                            title: Text(
+                              chapter.title,
+                              style: TextStyle(
+                                color: const Color(0xFF4E342E),
+                                fontWeight:
+                                    index == _currentChapterIndex.floor()
+                                        ? FontWeight.bold
+                                        : FontWeight.normal,
+                              ),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            onTap: () {
+                              Navigator.pop(context);
+                              _goToPosition(index.toDouble());
+                            },
+                          );
+                        },
                       ),
-                      title: Text(
-                        chapter.title,
-                        style: TextStyle(
-                          color: const Color(0xFF4E342E),
-                          fontWeight: index == _currentChapterIndex.floor()
-                              ? FontWeight.bold
-                              : FontWeight.normal,
-                        ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      onTap: () {
-                        Navigator.pop(context);
-                        _goToPosition(index.toDouble());
-                      },
-                    );
-                  },
-                ),
               ),
               Padding(
                 padding: const EdgeInsets.all(16.0),
@@ -437,7 +452,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('На этом месте уже есть закладка или цитата'),
-            backgroundColor: Color(0xFF8D6E63), // Тот же цвет, что у основной темы
+            backgroundColor: Color(0xFF8D6E63),
+            // Тот же цвет, что у основной темы
             duration: Duration(seconds: 2),
           ),
         );
@@ -450,10 +466,13 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     final currentOffset = _scrollController.offset;
     final scrollPercent = maxScroll > 0 ? (currentOffset / maxScroll) : 0.0;
 
-    final selectedText = _chapters[_currentChapterIndex.toInt()].content.substring(
-      _selection.start,
-      _selection.end,
-    ).trim();
+    final selectedText = _chapters[_currentChapterIndex.toInt()]
+        .content
+        .substring(
+          _selection.start,
+          _selection.end,
+        )
+        .trim();
 
     final position = ReadingPosition(
       chapterIndex: _currentChapterIndex,
@@ -482,41 +501,21 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   }
 
   Future<void> _saveQuoteAtSelection() async {
-    if (!_selection.isValid || _selection.start == _selection.end) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Выделите текст для цитаты'),
-          backgroundColor: Color(0xFF8D6E63),
-        ),
-      );
-      return;
-    }
+    if (!_selection.isValid || _selection.start == _selection.end) return;
 
     final chapter = _currentChapter;
     if (chapter == null) return;
 
-    final String selectedText = chapter.content.substring(
-      _selection.start,
-      _selection.end,
-    ).trim();
-
+    final String selectedText =
+        chapter.content.substring(_selection.start, _selection.end).trim();
     if (selectedText.isEmpty) return;
 
     final repo = ref.read(bookRepositoryProvider);
-
-    // Проверяем существование ЛЮБОЙ метки (закладка или цитата)
     final exists = await repo.anyMarkExists(widget.book.id, _selection.start);
 
     if (exists) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('На этом месте уже есть закладка или цитата'),
-            backgroundColor: Color(0xFF8D6E63),
-            duration: Duration(seconds: 2),
-          ),
-        );
-      }
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Уже есть метка'), backgroundColor: Color(0xFF8D6E63)));
       return;
     }
 
@@ -530,29 +529,23 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     final bool? isSaved = await _showQuoteDialog(position, selectedText);
 
     if (isSaved == true) {
-      final updatedQuotes = await DatabaseHelper.instance.getQuotesWithPosition(widget.book.id);
+      // ВМЕСТО РУЧНОГО setState С КЛЮЧОМ, ВЫЗЫВАЕМ БЕСШОВНОЕ ОБНОВЛЕНИЕ
+      await _refreshUI();
+
       setState(() {
-        _quotes = updatedQuotes;
         _isTextSelected = false;
         _showSelectionToolbar = false;
-
-        _refreshTextMarkers();
-        _textKey = UniqueKey();
       });
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Цитата сохранена'),
-            backgroundColor: Color(0xFF8D6E63),
-            duration: Duration(seconds: 1),
-          ),
-        );
-      }
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Цитата сохранена'),
+          backgroundColor: Color(0xFF8D6E63),
+          duration: Duration(seconds: 1)));
     }
   }
 
-  Future<bool?> _showQuoteDialog(ReadingPosition position, String selectedText) {
+  Future<bool?> _showQuoteDialog(
+      ReadingPosition position, String selectedText) {
     final noteController = TextEditingController();
 
     // Возвращаем результат showDialog (true если сохранили, null если отменили)
@@ -562,11 +555,13 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
         backgroundColor: const Color(0xFFEDE7D9),
         title: const Text(
           'Сохранить цитату',
-          style: TextStyle(color: Color(0xFF4E342E), fontWeight: FontWeight.bold),
+          style:
+              TextStyle(color: Color(0xFF4E342E), fontWeight: FontWeight.bold),
         ),
         content: SizedBox(
           width: double.maxFinite,
-          child: SingleChildScrollView( // Заменил ListView на SingleChildScrollView для лучшей работы с клавиатурой
+          child: SingleChildScrollView(
+            // Заменил ListView на SingleChildScrollView для лучшей работы с клавиатурой
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -584,7 +579,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                   ),
                   child: Text(
                     selectedText,
-                    style: const TextStyle(color: Color(0xFF4E342E), fontStyle: FontStyle.italic),
+                    style: const TextStyle(
+                        color: Color(0xFF4E342E), fontStyle: FontStyle.italic),
                   ),
                 ),
                 const SizedBox(height: 16),
@@ -595,7 +591,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                     labelText: 'Ваш комментарий',
                     labelStyle: TextStyle(color: Color(0xFF7B5E57)),
                     focusedBorder: UnderlineInputBorder(
-                      borderSide: BorderSide(color: Color(0xFF4E342E), width: 2),
+                      borderSide:
+                          BorderSide(color: Color(0xFF4E342E), width: 2),
                     ),
                   ),
                   style: const TextStyle(color: Color(0xFF4E342E)),
@@ -606,8 +603,10 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context, false), // Возвращаем false
-            child: const Text('Отмена', style: TextStyle(color: Color(0xFF7B5E57))),
+            onPressed: () => Navigator.pop(context, false),
+            // Возвращаем false
+            child: const Text('Отмена',
+                style: TextStyle(color: Color(0xFF7B5E57))),
           ),
           TextButton(
             onPressed: () async {
@@ -617,11 +616,14 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                   widget.book.id,
                   position,
                   selectedText,
-                  noteController.text.trim().isEmpty ? null : noteController.text.trim(),
+                  noteController.text.trim().isEmpty
+                      ? null
+                      : noteController.text.trim(),
                 );
 
                 if (!context.mounted) return;
-                Navigator.pop(context, true); // Возвращаем true - сигнал к обновлению UI
+                Navigator.pop(
+                    context, true); // Возвращаем true - сигнал к обновлению UI
               } catch (e) {
                 print("Ошибка сохранения цитаты: $e");
                 Navigator.pop(context, false);
@@ -629,7 +631,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
             },
             child: const Text(
               'Сохранить',
-              style: TextStyle(color: Color(0xFF4E342E), fontWeight: FontWeight.bold),
+              style: TextStyle(
+                  color: Color(0xFF4E342E), fontWeight: FontWeight.bold),
             ),
           ),
         ],
@@ -638,9 +641,10 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   }
 
   void _shareQuote(String text) {
-    final shareText = '''      
+    final shareText = '''
       "$text" – ${widget.book.author}. ${widget.book.title}.
-      '''.trim();
+      '''
+        .trim();
 
     Share.share(shareText);
   }
@@ -702,12 +706,14 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                   itemCount: _bookmarks.length,
                   itemBuilder: (context, index) {
                     final bookmark = _bookmarks[index];
-                    final chapterTitle = bookmark.chapterIndex < _chapters.length
-                        ? _chapters[bookmark.chapterIndex.floor()].title
-                        : 'Глава ${bookmark.chapterIndex.floor() + 1}';
+                    final chapterTitle =
+                        bookmark.chapterIndex < _chapters.length
+                            ? _chapters[bookmark.chapterIndex.floor()].title
+                            : 'Глава ${bookmark.chapterIndex.floor() + 1}';
 
                     return ListTile(
-                      leading: const Icon(Icons.bookmark, color: Color(0xFF7B5E57)),
+                      leading:
+                          const Icon(Icons.bookmark, color: Color(0xFF7B5E57)),
                       title: Text(
                         bookmark.selectedText ?? 'Закладка',
                         style: const TextStyle(color: Color(0xFF4E342E)),
@@ -720,12 +726,15 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                         maxLines: 2,
                       ),
                       trailing: PopupMenuButton<String>(
-                        icon: const Icon(Icons.more_vert, color: Color(0xFF7B5E57), size: 18),
+                        icon: const Icon(Icons.more_vert,
+                            color: Color(0xFF7B5E57), size: 18),
                         onSelected: (value) {
                           if (value == 'delete') {
                             _deleteBookmark(bookmark);
-                          } else if (value == 'share' && bookmark.selectedText != null) {
-                            Share.share('"${bookmark.selectedText!}" - ${widget.book.author}. ${widget.book.title}.');
+                          } else if (value == 'share' &&
+                              bookmark.selectedText != null) {
+                            Share.share(
+                                '"${bookmark.selectedText!}" - ${widget.book.author}. ${widget.book.title}.');
                           }
                         },
                         itemBuilder: (context) => [
@@ -734,7 +743,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                               value: 'share',
                               child: Row(
                                 children: [
-                                  Icon(Icons.share, size: 16, color: Color(0xFF7B5E57)),
+                                  Icon(Icons.share,
+                                      size: 16, color: Color(0xFF7B5E57)),
                                   SizedBox(width: 8),
                                   Text('Поделиться'),
                                 ],
@@ -744,7 +754,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                             value: 'delete',
                             child: Row(
                               children: [
-                                Icon(Icons.delete, size: 16, color: Color(0xFF7B5E57)),
+                                Icon(Icons.delete,
+                                    size: 16, color: Color(0xFF7B5E57)),
                                 SizedBox(width: 8),
                                 Text('Удалить'),
                               ],
@@ -818,7 +829,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                         : 'Глава ${quote.chapterIndex.floor() + 1}';
 
                     return ListTile(
-                      leading: const Icon(Icons.format_quote, color: Color(0xFF7B5E57)),
+                      leading: const Icon(Icons.format_quote,
+                          color: Color(0xFF7B5E57)),
                       title: Text(
                         quote.selectedText ?? 'Цитата',
                         style: const TextStyle(color: Color(0xFF4E342E)),
@@ -831,12 +843,15 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                         maxLines: 2,
                       ),
                       trailing: PopupMenuButton<String>(
-                        icon: const Icon(Icons.more_vert, color: Color(0xFF7B5E57), size: 18),
+                        icon: const Icon(Icons.more_vert,
+                            color: Color(0xFF7B5E57), size: 18),
                         onSelected: (value) {
                           if (value == 'delete') {
                             _deleteQuote(quote);
-                          } else if (value == 'share' && quote.selectedText != null) {
-                            Share.share('"${quote.selectedText!}" - ${widget.book.author}. ${widget.book.title}.');
+                          } else if (value == 'share' &&
+                              quote.selectedText != null) {
+                            Share.share(
+                                '"${quote.selectedText!}" - ${widget.book.author}. ${widget.book.title}.');
                           }
                         },
                         itemBuilder: (context) => [
@@ -845,7 +860,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                               value: 'share',
                               child: Row(
                                 children: [
-                                  Icon(Icons.share, size: 16, color: Color(0xFF7B5E57)),
+                                  Icon(Icons.share,
+                                      size: 16, color: Color(0xFF7B5E57)),
                                   SizedBox(width: 8),
                                   Text('Поделиться'),
                                 ],
@@ -855,7 +871,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                             value: 'delete',
                             child: Row(
                               children: [
-                                Icon(Icons.delete, size: 16, color: Color(0xFF7B5E57)),
+                                Icon(Icons.delete,
+                                    size: 16, color: Color(0xFF7B5E57)),
                                 SizedBox(width: 8),
                                 Text('Удалить'),
                               ],
@@ -946,29 +963,20 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFFEDE7D9),
-        title: const Text(
-          'Удалить цитату?',
-          style: TextStyle(color: Color(0xFF4E342E)),
-        ),
+        title: const Text('Удалить цитату?',
+            style: TextStyle(color: Color(0xFF4E342E))),
         content: Text(
-          'Вы уверены, что хотите удалить цитату "${quote.selectedText ?? 'без текста'}"?',
-          style: const TextStyle(color: Color(0xFF4E342E)),
-        ),
+            'Вы уверены, что хотите удалить цитату "${quote.selectedText ?? 'без текста'}"?',
+            style: const TextStyle(color: Color(0xFF4E342E))),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text(
-              'Отмена',
-              style: TextStyle(color: Color(0xFF4E342E)),
-            ),
-          ),
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Отмена',
+                  style: TextStyle(color: Color(0xFF4E342E)))),
           TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text(
-              'Удалить',
-              style: TextStyle(color: Color(0xFF4E342E)),
-            ),
-          ),
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Удалить',
+                  style: TextStyle(color: Color(0xFF4E342E)))),
         ],
       ),
     );
@@ -976,20 +984,18 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     if (result == true && quote.id != null) {
       try {
         await DatabaseHelper.instance.deleteQuoteById(quote.id!);
-        await _loadBookmarksAndQuotes();
+
+        // Используем БЕСШОВНОЕ обновление
+        await _refreshUI();
+
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Цитата удалена'),
-            backgroundColor: Color(0xFF8D6E63),
-          ),
+              content: Text('Цитата удалена'),
+              backgroundColor: Color(0xFF8D6E63)),
         );
       } catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Ошибка удаления: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Ошибка удаления: $e'), backgroundColor: Colors.red));
       }
     }
   }
@@ -1099,7 +1105,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                       }
 
                       final String selectedText = content.plainText;
-                      final int startOffset = chapter.content.indexOf(selectedText);
+                      final int startOffset =
+                          chapter.content.indexOf(selectedText);
 
                       if (startOffset != -1) {
                         _selection = TextSelection(
@@ -1112,7 +1119,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                         });
                       }
                     },
-                    contextMenuBuilder: (context, state) => const SizedBox.shrink(),
+                    contextMenuBuilder: (context, state) =>
+                        const SizedBox.shrink(),
                     child: SingleChildScrollView(
                       controller: _scrollController,
                       padding: const EdgeInsets.fromLTRB(24, 20, 24, 160),
@@ -1132,13 +1140,13 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                             chapter.content,
                             _indexedMarks[_currentChapterIndex.floor()] ?? [],
                             _readerSettings,
+                            (mark) => _showCommentBottomSheet(mark),
                           ),
                         ],
                       ),
                     ),
                   ),
                 ),
-
                 AnimatedPositioned(
                   duration: const Duration(milliseconds: 250),
                   curve: Curves.fastOutSlowIn,
@@ -1162,10 +1170,12 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                     },
                     onShare: () {
                       if (_selection.start != -1 && _selection.end != -1) {
-                        final textToShare = chapter.content.substring(
-                          _selection.start,
-                          _selection.end,
-                        ).trim();
+                        final textToShare = chapter.content
+                            .substring(
+                              _selection.start,
+                              _selection.end,
+                            )
+                            .trim();
                         _shareQuote(textToShare);
                       }
                     },
@@ -1183,6 +1193,198 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     );
   }
 
+  void _showCommentBottomSheet(dynamic mark) {
+    final TextEditingController commentController =
+        TextEditingController(text: mark.comment);
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      // Позволяет шторке подниматься выше половины экрана
+      backgroundColor: Colors.transparent,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (BuildContext context) {
+        // Используем Padding с viewInsets, чтобы контент сдвигался вверх на высоту клавиатуры
+        return Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(context).viewInsets.bottom,
+          ),
+          child: Container(
+            // Ограничиваем максимальную высоту в 75% экрана, чтобы шторка не прыгала на весь экран
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(context).size.height * 0.75,
+            ),
+            decoration: const BoxDecoration(
+              color: Color(0xFFFDFBF7),
+              borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+            ),
+            child: SafeArea(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                // Шторка сожмется под размер контента, если текста мало
+                children: [
+                  const SizedBox(height: 12),
+                  Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFE0DCD3),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+
+                  // Скроллируемая часть
+                  Flexible(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                'Заметка к цитате',
+                                style: TextStyle(
+                                  fontFamily:
+                                      _readerSettings.fontFamily ?? 'Serif',
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                  color: const Color(0xFF3E2723),
+                                ),
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.share_outlined,
+                                    color: Color(0xFF8B7E74)),
+                                tooltip: 'Поделиться цитатой',
+                                onPressed: () {
+                                  if (mark.selectedText != null &&
+                                      mark.selectedText!.isNotEmpty) {
+                                    _shareQuote(mark.selectedText!.trim());
+                                  }
+                                },
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF5F2EB),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            width: double.infinity,
+                            child: Text(
+                              '"${mark.selectedText}"',
+                              style: TextStyle(
+                                fontFamily:
+                                    _readerSettings.fontFamily ?? 'Serif',
+                                fontSize: 14,
+                                fontStyle: FontStyle.italic,
+                                color: const Color(0xFF6D4C41),
+                                height: 1.4,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          TextField(
+                            controller: commentController,
+                            maxLines: null,
+                            minLines: 3,
+                            autofocus: false,
+                            cursorColor: const Color(0xFFD4A373),
+                            style: const TextStyle(
+                                color: Color(0xFF2B1D11), fontSize: 16),
+                            decoration: InputDecoration(
+                              hintText: 'Напишите свои мысли или заметку...',
+                              hintStyle:
+                                  const TextStyle(color: Color(0xFFA69F96)),
+                              filled: true,
+                              fillColor: const Color(0xFFFBF9F5),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(10),
+                                borderSide: const BorderSide(
+                                    color: Color(0xFFD4A373), width: 1.5),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(10),
+                                borderSide: const BorderSide(
+                                    color: Color(0xFFEFEBE4), width: 1),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 20),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  // Панель кнопок (фиксированно снизу шторки, но над клавиатурой)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
+                    child: Row(
+                      children: [
+                        TextButton.icon(
+                          onPressed: () {
+                            Navigator.pop(context);
+                            _deleteQuote(mark);
+                          },
+                          icon: const Icon(Icons.delete_outline,
+                              color: Colors.redAccent, size: 20),
+                          label: const Text('Удалить',
+                              style: TextStyle(color: Colors.redAccent)),
+                        ),
+                        const Spacer(),
+                        TextButton(
+                          onPressed: () => Navigator.pop(context),
+                          child: const Text('Отмена',
+                              style: TextStyle(color: Color(0xFF8B7E74))),
+                        ),
+                        const SizedBox(width: 8),
+                        ElevatedButton(
+                          // Внутри _showCommentBottomSheet, в кнопке "Сохранить":
+                          onPressed: () async {
+                            final String newComment =
+                                commentController.text.trim();
+                            Navigator.pop(context);
+
+                            // Прямо передаем null, если строка пустая
+                            final String? valueToUpdate =
+                                newComment.isEmpty ? null : newComment;
+
+                            // 1. Обновляем БД (метод выше сам обработает null)
+                            await DatabaseHelper.instance
+                                .updateQuoteComment(mark.id!, valueToUpdate);
+
+                            // 2. Обновляем UI
+                            await _refreshUI();
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFFD4A373),
+                            foregroundColor: Colors.white,
+                            elevation: 0,
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8)),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 20, vertical: 12),
+                          ),
+                          child: const Text('Сохранить',
+                              style: TextStyle(fontWeight: FontWeight.bold)),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
 
   Widget _buildTextContent(ChapterEntity chapter) {
     return LayoutBuilder(
@@ -1197,7 +1399,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                 Theme(
                   data: ThemeData(
                     textSelectionTheme: const TextSelectionThemeData(
-                      selectionColor: Color(0x26D4A373), // Элегантное янтарное выделение при зажатии
+                      selectionColor: Color(0x26D4A373),
+                      // Элегантное янтарное выделение при зажатии
                       selectionHandleColor: Color(0xFFD4A373),
                     ),
                   ),
@@ -1212,7 +1415,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                       }
 
                       final String selectedText = content.plainText;
-                      final int startOffset = chapter.content.indexOf(selectedText);
+                      final int startOffset =
+                          chapter.content.indexOf(selectedText);
 
                       if (startOffset != -1) {
                         _selection = TextSelection(
@@ -1225,7 +1429,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                         });
                       }
                     },
-                    contextMenuBuilder: (context, state) => const SizedBox.shrink(),
+                    contextMenuBuilder: (context, state) =>
+                        const SizedBox.shrink(),
                     child: SingleChildScrollView(
                       controller: _scrollController,
                       padding: const EdgeInsets.fromLTRB(24, 20, 24, 160),
@@ -1236,6 +1441,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                           chapter.content,
                           _indexedMarks[_currentChapterIndex.floor()] ?? [],
                           _readerSettings,
+                          (mark) => _showCommentBottomSheet(mark),
                         ),
                       ),
                     ),
@@ -1266,10 +1472,12 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                     },
                     onShare: () {
                       if (_selection.start != -1 && _selection.end != -1) {
-                        final textToShare = chapter.content.substring(
-                          _selection.start,
-                          _selection.end,
-                        ).trim();
+                        final textToShare = chapter.content
+                            .substring(
+                              _selection.start,
+                              _selection.end,
+                            )
+                            .trim();
                         _shareQuote(textToShare);
                       }
                     },
@@ -1285,6 +1493,23 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
         );
       },
     );
+  }
+
+  void _updateMarkInDatabase(dynamic mark) async {
+    print("Попытка сохранить комментарий для ID: ${mark.id}");
+
+    if (mark.id != null) {
+      int rowsAffected = await DatabaseHelper.instance
+          .updateQuoteComment(mark.id!, mark.comment);
+      print("Обновлено строк в БД: $rowsAffected");
+    } else {
+      print(
+          "Ошибка: ID цитаты равен null! Нам не у чего обновлять комментарий.");
+      // Альтернативный вариант: если ID нет, возможно, эту цитату нужно СНАЧАЛА создать в базе?
+      // Например:
+      // int newId = await DatabaseHelper.instance.addQuoteWithPosition(_currentBookId, mark, mark.selectedText ?? '', mark.comment);
+      // mark.id = newId;
+    }
   }
 
   void _handleMarkTap(ReadingPosition mark) {
@@ -1397,7 +1622,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                                 onPressed: () => Navigator.pop(context),
                                 style: OutlinedButton.styleFrom(
                                   foregroundColor: const Color(0xFF7B5E57),
-                                  side: const BorderSide(color: Color(0xFF7B5E57)),
+                                  side: const BorderSide(
+                                      color: Color(0xFF7B5E57)),
                                 ),
                                 child: const Text('Закрыть'),
                               ),
@@ -1438,9 +1664,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     final chapter = _currentChapter;
     if (chapter == null) return;
 
-    final selectedText = chapter.content
-        .substring(_selection.start, _selection.end)
-        .trim();
+    final selectedText =
+        chapter.content.substring(_selection.start, _selection.end).trim();
 
     if (selectedText.isEmpty) return;
 
@@ -1466,7 +1691,6 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                   ),
                 ),
                 const SizedBox(height: 12),
-
                 Text(
                   selectedText,
                   style: const TextStyle(
@@ -1474,9 +1698,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                     color: Color(0xFF3E2F2B),
                   ),
                 ),
-
                 const SizedBox(height: 16),
-
                 Row(
                   children: [
                     Expanded(
@@ -1604,14 +1826,11 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
           }
         },
         child: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 150), 
+          duration: const Duration(milliseconds: 150),
           transitionBuilder: (Widget child, Animation<double> animation) {
             return FadeTransition(opacity: animation, child: child);
           },
-          child: KeyedSubtree(
-            key: ValueKey<double>(_currentChapterIndex),
-            child: _buildContent(),
-          ),
+          child: _buildContent(),
         ),
       ),
       bottomNavigationBar: BottomAppBar(
@@ -1633,7 +1852,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                     if (_currentChapter != null) // Защита от null
                       Text(
                         _currentChapter!.title,
-                        style: const TextStyle(color: Color(0xFF4E342E), fontSize: 16),
+                        style: const TextStyle(
+                            color: Color(0xFF4E342E), fontSize: 16),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         textAlign: TextAlign.center,
@@ -1642,10 +1862,12 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                     ClipRRect(
                       borderRadius: BorderRadius.circular(10),
                       child: // Внутри BottomAppBar -> Expanded -> Column:
-                      LinearProgressIndicator(
-                        value: _currentChapterProgress, // Теперь это процент внутри текущей главы
+                          LinearProgressIndicator(
+                        value: _currentChapterProgress,
+                        // Теперь это процент внутри текущей главы
                         backgroundColor: const Color(0xFFD7CCC8),
-                        valueColor: const AlwaysStoppedAnimation(Color(0xFF7B5E57)),
+                        valueColor:
+                            const AlwaysStoppedAnimation(Color(0xFF7B5E57)),
                         minHeight: 6,
                       ),
                     ),
@@ -1654,7 +1876,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
               ),
             ),
             IconButton(
-              onPressed: _currentChapterIndex < _chapters.length - 1 ? _nextChapter : null,
+              onPressed: _currentChapterIndex < _chapters.length - 1
+                  ? _nextChapter
+                  : null,
               icon: const Icon(Icons.arrow_forward, color: Color(0xFF7B5E57)),
             ),
           ],
@@ -1687,14 +1911,44 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
         _currentChapterIndex.toInt(),
         percent,
       );
-      print("Позиция принудительно сохранена: глава ${_currentChapterIndex.toInt()}, $percent%");
+      print(
+          "Позиция принудительно сохранена: глава ${_currentChapterIndex.toInt()}, $percent%");
     }
+  }
+
+  Future<void> _refreshUI() async {
+    final double currentScroll =
+        _scrollController.hasClients ? _scrollController.offset : 0.0;
+
+    final bookmarks =
+        await DatabaseHelper.instance.getBookmarksWithPosition(widget.book.id);
+    final quotes =
+        await DatabaseHelper.instance.getQuotesWithPosition(widget.book.id);
+
+    final Map<int, List<ReadingPosition>> newMap = {};
+    for (var mark in [...bookmarks, ...quotes]) {
+      newMap.putIfAbsent(mark.chapterIndex.floor(), () => []).add(mark);
+    }
+
+    setState(() {
+      _quotes = quotes;
+      _bookmarks = bookmarks;
+      _indexedMarks = newMap;
+    });
+
+    // Восстанавливаем позицию
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients) {
+        _scrollController.jumpTo(currentScroll);
+      }
+    });
   }
 
   Future<void> _performImmediateSave() async {
     if (_scrollController.hasClients) {
       final maxScroll = _scrollController.position.maxScrollExtent;
-      final percent = maxScroll > 0 ? (_scrollController.offset / maxScroll) : 0.0;
+      final percent =
+          maxScroll > 0 ? (_scrollController.offset / maxScroll) : 0.0;
 
       await DatabaseHelper.instance.updatePosition(
         widget.book.id,

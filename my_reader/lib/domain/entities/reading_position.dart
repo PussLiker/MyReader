@@ -40,16 +40,42 @@ class ReadingPosition {
     );
   }
 
-  // Обновим сравнение, чтобы оно учитывало и позицию
+  ReadingPosition copyWith({
+    int? id,
+    double? chapterIndex,
+    double? position,
+    int? charOffset,
+    String? selectedText,
+    String? note,
+    String? comment,
+  }) {
+    return ReadingPosition(
+      id: id ?? this.id,
+      chapterIndex: chapterIndex ?? this.chapterIndex,
+      position: position ?? this.position,
+      charOffset: charOffset ?? this.charOffset,
+      selectedText: selectedText ?? this.selectedText,
+      note: note ?? this.note,
+      comment: comment ?? this.comment, // Сюда прилетит обновленная заметка
+    );
+  }
+
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
           other is ReadingPosition &&
               runtimeType == other.runtimeType &&
+              id == other.id &&
               chapterIndex == other.chapterIndex &&
               position == other.position &&
-              charOffset == other.charOffset;
+              charOffset == other.charOffset &&
+              comment == other.comment;
 
   @override
-  int get hashCode => chapterIndex.hashCode ^ position.hashCode ^ charOffset.hashCode;
-}
+  int get hashCode =>
+      id.hashCode ^
+      chapterIndex.hashCode ^
+      position.hashCode ^
+      charOffset.hashCode ^
+      comment.hashCode;
+ }
