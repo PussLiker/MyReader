@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:ui';
 
 class SelectionToolbar extends StatelessWidget {
   final VoidCallback onAddBookmark;
@@ -16,58 +17,71 @@ class SelectionToolbar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Positioned(
-      bottom: 80,
-      left: 20,
-      right: 20,
-      child: Material(
-        elevation: 8,
-        borderRadius: BorderRadius.circular(16),
-        child: Container(
-          decoration: BoxDecoration(
-            color: const Color(0xFFEDE7D9),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: const Color(0xFFD7CCC8),
-              width: 1,
-            ),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 4.0),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
-                _buildAction(
-                  icon: Icons.bookmark_add,
-                  label: 'Закладка',
-                  onPressed: onAddBookmark,
-                  color: const Color(0xFF7B5E57),
+    // Тулбар больше не использует системные оверлеи, он рендерится как самостоятельный красивый блок
+    return Align(
+      alignment: Alignment.bottomCenter,
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 24.0), // Отступ чуть выше низа экрана
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(20),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12), // Эффект размытия стекла detrás
+            child: Container(
+              height: 64, // Жесткая высота, защищающая от RenderFlex overflow
+              width: MediaQuery.of(context).size.width * 0.9, // 90% от ширины экрана
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    const Color(0xFFEDE7D9).withOpacity(0.85),
+                    const Color(0xFFE0D8C3).withOpacity(0.85),
+                  ],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
                 ),
-                _buildAction(
-                  icon: Icons.format_quote,
-                  label: 'Цитата',
-                  onPressed: onSaveQuote,
-                  color: const Color(0xFF7B5E57),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: Colors.white.withOpacity(0.4),
+                  width: 1.5,
                 ),
-                _buildAction(
-                  icon: Icons.share,
-                  label: 'Поделиться',
-                  onPressed: onShare,
-                  color: const Color(0xFF7B5E57),
-                ),
-                Container(
-                  width: 1,
-                  height: 30,
-                  color: const Color(0xFFD7CCC8),
-                  margin: const EdgeInsets.symmetric(horizontal: 4),
-                ),
-                _buildAction(
-                  icon: Icons.close,
-                  label: 'Закрыть',
-                  onPressed: onClose,
-                  color: const Color(0xFF8D6E63),
-                ),
-              ],
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.08),
+                    blurRadius: 20,
+                    offset: const Offset(0, 8),
+                  ),
+                ],
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  _buildAction(
+                    icon: Icons.bookmark_add_rounded,
+                    label: 'Закладка',
+                    onPressed: onAddBookmark,
+                  ),
+                  _buildAction(
+                    icon: Icons.format_quote_rounded,
+                    label: 'Цитата',
+                    onPressed: onSaveQuote,
+                  ),
+                  _buildAction(
+                    icon: Icons.share_rounded,
+                    label: 'Поделиться',
+                    onPressed: onShare,
+                  ),
+                  Container(
+                    width: 1,
+                    height: 28,
+                    color: const Color(0xFF7B5E57).withOpacity(0.2),
+                  ),
+                  _buildAction(
+                    icon: Icons.close_rounded,
+                    label: 'Закрыть',
+                    onPressed: onClose,
+                    isClose: true,
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -79,24 +93,28 @@ class SelectionToolbar extends StatelessWidget {
     required IconData icon,
     required String label,
     required VoidCallback onPressed,
-    required Color color,
+    bool isClose = false,
   }) {
+    final Color color = isClose ? const Color(0xFF8D6E63) : const Color(0xFF5D4037);
+
     return InkWell(
       onTap: onPressed,
       borderRadius: BorderRadius.circular(12),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         child: Column(
           mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, color: color, size: 24),
-            const SizedBox(height: 4),
+            Icon(icon, color: color, size: 22),
+            const SizedBox(height: 3),
             Text(
               label,
               style: TextStyle(
                 color: color,
                 fontSize: 10,
-                fontWeight: FontWeight.w500,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.2,
               ),
             ),
           ],

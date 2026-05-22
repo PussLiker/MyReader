@@ -1,8 +1,11 @@
 import 'dart:async';
+import 'package:flutter/rendering.dart';
+
 import '../../domain/entities/Selection.dart';
 import '../../domain/entities/reader_settings.dart';
 import '../../domain/use_cases/settings_service.dart';
 import '../providers/book_provider.dart';
+import '../widgets/highlight_painter.dart';
 import '../widgets/selection_toolbar.dart';
 import 'package:flutter/material.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
@@ -1061,181 +1064,226 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   }
 
   Widget _buildEpubContent(ChapterEntity chapter) {
+    final TextStyle titleStyle = TextStyle(
+      fontFamily: _readerSettings.fontFamily ?? 'Serif',
+      fontSize: (_readerSettings.fontSize ?? 18.0) + 6,
+      height: 1.3,
+      fontWeight: FontWeight.bold,
+      color: const Color(0xFF3E2723),
+    );
+
     return LayoutBuilder(
-        builder: (context, constraints) {
-          return Stack(
-            children: [
-              SizedBox(
-                width: constraints.maxWidth,
-                height: constraints.maxHeight,
-                child: SingleChildScrollView(
-                  controller: _scrollController,
-                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 80),
-                  child: Column( // Теперь это внутри SizedBox, всё будет ок
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Center(
-                        child: Text(
-                          chapter.title,
-                          style: const TextStyle(
-                            fontSize: 24.0,
-                            fontWeight: FontWeight.bold,
-                            color: Color(0xFF4E342E),
+      builder: (context, constraints) {
+        return SizedBox(
+          width: constraints.maxWidth,
+          height: constraints.maxHeight,
+          child: Material(
+            color: const Color(0xFFF5F2EB),
+            child: Stack(
+              children: [
+                Theme(
+                  data: ThemeData(
+                    textSelectionTheme: const TextSelectionThemeData(
+                      selectionColor: Color(0x26D4A373),
+                      selectionHandleColor: Color(0xFFD4A373),
+                    ),
+                  ),
+                  child: SelectionArea(
+                    onSelectionChanged: (SelectedContent? content) {
+                      if (content == null || content.plainText.isEmpty) {
+                        setState(() {
+                          _isTextSelected = false;
+                          _showSelectionToolbar = false;
+                        });
+                        return;
+                      }
+
+                      final String selectedText = content.plainText;
+                      final int startOffset = chapter.content.indexOf(selectedText);
+
+                      if (startOffset != -1) {
+                        _selection = TextSelection(
+                          baseOffset: startOffset,
+                          extentOffset: startOffset + selectedText.length,
+                        );
+                        setState(() {
+                          _isTextSelected = true;
+                          _showSelectionToolbar = true;
+                        });
+                      }
+                    },
+                    contextMenuBuilder: (context, state) => const SizedBox.shrink(),
+                    child: SingleChildScrollView(
+                      controller: _scrollController,
+                      padding: const EdgeInsets.fromLTRB(24, 20, 24, 160),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Center(
+                            child: Text(
+                              chapter.title,
+                              style: titleStyle,
+                              textAlign: TextAlign.center,
+                            ),
                           ),
-                          textAlign: TextAlign.center,
-                        ),
+                          const SizedBox(height: 24),
+                          // Разворачиваем сгенерированные блоки контента главы
+                          ...TextTransformer.buildTextBlocks(
+                            chapter.content,
+                            _indexedMarks[_currentChapterIndex.floor()] ?? [],
+                            _readerSettings,
+                          ),
+                        ],
                       ),
-                      const SizedBox(height: 24),
-                      _buildSelectableEpubContent(chapter.content),
-                    ],
+                    ),
                   ),
                 ),
-              ),
-              if (_showSelectionToolbar && _isTextSelected)
-                SelectionToolbar(
-                  onAddBookmark: _addBookmarkAtSelection,
-                  onSaveQuote: _saveQuoteAtSelection,
-                  onShare: () {
-                    // Логика получения текста для отправки
-                    final selectedText = _currentChapter!.content.substring(
-                      _selection.start,
-                      _selection.end,
-                    ).trim();
-                    _shareQuote(selectedText);
-                  },
-                  onClose: () {
-                    setState(() {
+
+                AnimatedPositioned(
+                  duration: const Duration(milliseconds: 250),
+                  curve: Curves.fastOutSlowIn,
+                  bottom: _showSelectionToolbar && _isTextSelected ? 0 : -100,
+                  left: 0,
+                  right: 0,
+                  child: SelectionToolbar(
+                    onAddBookmark: () {
+                      _addBookmarkAtSelection();
+                      setState(() {
+                        _showSelectionToolbar = false;
+                        _isTextSelected = false;
+                      });
+                    },
+                    onSaveQuote: () {
+                      _saveQuoteAtSelection();
+                      setState(() {
+                        _showSelectionToolbar = false;
+                        _isTextSelected = false;
+                      });
+                    },
+                    onShare: () {
+                      if (_selection.start != -1 && _selection.end != -1) {
+                        final textToShare = chapter.content.substring(
+                          _selection.start,
+                          _selection.end,
+                        ).trim();
+                        _shareQuote(textToShare);
+                      }
+                    },
+                    onClose: () => setState(() {
                       _showSelectionToolbar = false;
                       _isTextSelected = false;
-                    });
-                  },
+                    }),
+                  ),
                 ),
-            ],
-          );
-        });
-  }
-
-  Widget _buildSelectableEpubContent(String content) {
-    return SelectableText.rich(
-      _buildTextWithHighlights(content),
-      style: TextStyle(
-        fontSize: 18.0,
-        height: _readerSettings.lineHeight,
-        color: const Color(0xFF4E342E),
-      ),
-      onSelectionChanged: (selection, cause) {
-        _selection = selection;
-
-        final isValid = selection.isValid && selection.start != selection.end;
-
-        if (!isValid) {
-          setState(() {
-            _isTextSelected = false;
-            _showSelectionToolbar = false;
-          });
-          return;
-        }
-
-        setState(() {
-          _isTextSelected = true;
-        });
-
-        Future.delayed(const Duration(milliseconds: 80), () {
-          if (!mounted) return;
-
-          setState(() {
-            _showSelectionToolbar = true;
-          });
-        });
+              ],
+            ),
+          ),
+        );
       },
     );
   }
 
 
   Widget _buildTextContent(ChapterEntity chapter) {
-    // Используем LayoutBuilder, чтобы точно знать доступную высоту
     return LayoutBuilder(
       builder: (context, constraints) {
-        return Stack(
-          children: [
-            // Ограничиваем область прокрутки размерами экрана
-            SizedBox(
-              width: constraints.maxWidth,
-              height: constraints.maxHeight,
-              child: SingleChildScrollView(
-                controller: _scrollController,
-                padding: const EdgeInsets.fromLTRB(20, 16, 20, 80), // Нижний отступ под Toolbar
-                child: RepaintBoundary(
-                  child: KeyedSubtree(
-                    key: _textKey,
-                    child: SelectableText.rich(
-                    _buildTextWithHighlights(chapter.content),
-                    style: TextStyle(
-                      fontSize: 18.0,
-                      height: _readerSettings.lineHeight,
-                      color: const Color(0xFF4E342E),
+        return SizedBox(
+          width: constraints.maxWidth,
+          height: constraints.maxHeight,
+          child: Material(
+            color: const Color(0xFFF5F2EB), // Цвет страницы книги
+            child: Stack(
+              children: [
+                Theme(
+                  data: ThemeData(
+                    textSelectionTheme: const TextSelectionThemeData(
+                      selectionColor: Color(0x26D4A373), // Элегантное янтарное выделение при зажатии
+                      selectionHandleColor: Color(0xFFD4A373),
                     ),
-                      onSelectionChanged: (selection, cause) {
-                        _selection = selection;
+                  ),
+                  child: SelectionArea(
+                    onSelectionChanged: (SelectedContent? content) {
+                      if (content == null || content.plainText.isEmpty) {
+                        setState(() {
+                          _isTextSelected = false;
+                          _showSelectionToolbar = false;
+                        });
+                        return;
+                      }
 
-                        final isValid = selection.isValid && selection.start != selection.end;
+                      final String selectedText = content.plainText;
+                      final int startOffset = chapter.content.indexOf(selectedText);
 
-                        if (!isValid) {
-                          setState(() {
-                            _isTextSelected = false;
-                            _showSelectionToolbar = false;
-                          });
-                          return;
-                        }
-
+                      if (startOffset != -1) {
+                        _selection = TextSelection(
+                          baseOffset: startOffset,
+                          extentOffset: startOffset + selectedText.length,
+                        );
                         setState(() {
                           _isTextSelected = true;
+                          _showSelectionToolbar = true;
                         });
-
-                        Future.delayed(const Duration(milliseconds: 80), () {
-                          if (!mounted) return;
-
-                          setState(() {
-                            _showSelectionToolbar = true;
-                          });
-                        });
-                      },
+                      }
+                    },
+                    contextMenuBuilder: (context, state) => const SizedBox.shrink(),
+                    child: SingleChildScrollView(
+                      controller: _scrollController,
+                      padding: const EdgeInsets.fromLTRB(24, 20, 24, 160),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        // Генерируем массив текстовых параграфов и коробочек-цитат
+                        children: TextTransformer.buildTextBlocks(
+                          chapter.content,
+                          _indexedMarks[_currentChapterIndex.floor()] ?? [],
+                          _readerSettings,
+                        ),
+                      ),
+                    ),
                   ),
-                  )
                 ),
-              ),
+
+                // Контекстный тулбар управления цитатами
+                AnimatedPositioned(
+                  duration: const Duration(milliseconds: 250),
+                  curve: Curves.fastOutSlowIn,
+                  bottom: _showSelectionToolbar && _isTextSelected ? 0 : -100,
+                  left: 0,
+                  right: 0,
+                  child: SelectionToolbar(
+                    onAddBookmark: () {
+                      _addBookmarkAtSelection();
+                      setState(() {
+                        _showSelectionToolbar = false;
+                        _isTextSelected = false;
+                      });
+                    },
+                    onSaveQuote: () {
+                      _saveQuoteAtSelection();
+                      setState(() {
+                        _showSelectionToolbar = false;
+                        _isTextSelected = false;
+                      });
+                    },
+                    onShare: () {
+                      if (_selection.start != -1 && _selection.end != -1) {
+                        final textToShare = chapter.content.substring(
+                          _selection.start,
+                          _selection.end,
+                        ).trim();
+                        _shareQuote(textToShare);
+                      }
+                    },
+                    onClose: () => setState(() {
+                      _showSelectionToolbar = false;
+                      _isTextSelected = false;
+                    }),
+                  ),
+                ),
+              ],
             ),
-            if (_showSelectionToolbar && _isTextSelected)
-              SelectionToolbar(
-                onAddBookmark: _addBookmarkAtSelection,
-                onSaveQuote: _saveQuoteAtSelection,
-                onShare: () {
-                  final selectedText = _currentChapter!.content.substring(
-                    _selection.start,
-                    _selection.end,
-                  ).trim();
-                  _shareQuote(selectedText);
-                },
-                onClose: () => setState(() {
-                  _showSelectionToolbar = false;
-                  _isTextSelected = false;
-                }),
-              ),
-          ],
+          ),
         );
       },
-    );
-  }
-
-  TextSpan _buildTextWithHighlights(String text) {
-    final currentChapterMarks =
-        _indexedMarks[_currentChapterIndex.floor()] ?? [];
-
-    return TextTransformer.buildHighlightedSpan(
-      text,
-      currentChapterMarks,
-      _readerSettings,
-      _handleMarkTap,
     );
   }
 

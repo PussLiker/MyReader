@@ -1,79 +1,68 @@
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import '../entities/reading_position.dart';
-import '../entities/reader_settings.dart';
+import '../../presentation/widgets/quote_block_widget.dart';
 
 class TextTransformer {
-  static TextSpan buildHighlightedSpan(
+  static List<Widget> buildTextBlocks(
       String text,
-      List<ReadingPosition> marks,
-      ReaderSettings settings,
-      void Function(ReadingPosition mark)? onTapQuote,
+      List<dynamic> marks,
+      dynamic settings,
       ) {
-    final baseStyle = TextStyle(
-      fontSize: settings.fontSize,
-      fontFamily: settings.fontFamily,
-      height: settings.lineHeight,
-      color: const Color(0xFF3E2F2B),
+    final TextStyle baseStyle = TextStyle(
+      fontFamily: settings.fontFamily ?? 'Serif',
+      fontSize: settings.fontSize ?? 18.0,
+      height: settings.lineHeight ?? 1.4,
+      color: const Color(0xFF3E2723),
     );
 
     if (marks.isEmpty) {
-      return TextSpan(text: text, style: baseStyle);
+      return [
+        Text(text, style: baseStyle)
+      ];
     }
 
-    final List<TextSpan> spans = [];
-
-    final sorted = List<ReadingPosition>.from(marks)
+    // Сортируем маркеры цитат по их положению в тексте
+    final sortedMarks = List.from(marks)
       ..sort((a, b) => a.charOffset.compareTo(b.charOffset));
 
-    int cursor = 0;
+    final List<Widget> blocks = [];
+    int currentIndex = 0;
 
-    for (final mark in sorted) {
-      final start = mark.charOffset;
+    for (var mark in sortedMarks) {
+      final int markStart = mark.charOffset;
+      final String? selectedText = mark.selectedText;
 
-      if (start < cursor || start >= text.length) {
-        continue;
+      if (selectedText == null || selectedText.isEmpty) continue;
+      final int markEnd = markStart + selectedText.length;
+
+      // Проверка на выход за границы (на всякий случай)
+      if (markStart < currentIndex || markEnd > text.length) continue;
+
+      // 1. Добавляем обычный текст, который шел ДО цитаты
+      if (markStart > currentIndex) {
+        final String normalText = text.substring(currentIndex, markStart);
+        if (normalText.trim().isNotEmpty) {
+          blocks.add(Text(normalText, style: baseStyle));
+        }
       }
 
-      if (start > cursor) {
-        spans.add(TextSpan(
-          text: text.substring(cursor, start),
-          style: baseStyle,
-        ));
-      }
-
-      final selected = mark.selectedText ?? '';
-
-      if (selected.isEmpty) {
-        continue;
-      }
-
-      final end = (start + selected.length).clamp(0, text.length);
-
-      final isQuote = (mark.note ?? '').isNotEmpty;
-
-      spans.add(
-        TextSpan(
-          text: text.substring(start, end),
-          style: baseStyle.copyWith(
-            backgroundColor: isQuote
-                ? const Color(0xFFFFF3E0)
-                : const Color(0xFFE8E0D1),
-            fontStyle: FontStyle.italic,
-          ),
-        ),
-      );
-
-      cursor = end;
-    }
-
-    if (cursor < text.length) {
-      spans.add(TextSpan(
-        text: text.substring(cursor),
-        style: baseStyle,
+      // 2. Добавляем цитату в виде кастомной коробочки с индикатором
+      final String quoteText = text.substring(markStart, markEnd);
+      blocks.add(QuoteBlockWidget(
+        text: quoteText,
+        baseStyle: baseStyle,
       ));
+
+      currentIndex = markEnd;
     }
 
-    return TextSpan(children: spans);
+    // 3. Добавляем оставшийся хвост текста ПОСЛЕ последней цитаты
+    if (currentIndex < text.length) {
+      final String trailingText = text.substring(currentIndex);
+      if (trailingText.trim().isNotEmpty) {
+        blocks.add(Text(trailingText, style: baseStyle));
+      }
+    }
+
+    return blocks;
   }
 }
