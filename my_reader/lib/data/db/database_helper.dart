@@ -74,17 +74,18 @@ class DatabaseHelper {
     ''');
 
     await db.execute('''
-      CREATE TABLE bookmarks (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        book_id INTEGER NOT NULL,
-        chapter_index REAL NOT NULL,
-        position REAL NOT NULL DEFAULT 0.0,
-        char_offset INTEGER NOT NULL,
-        selected_text TEXT,
-        note TEXT NOT NULL,
-        FOREIGN KEY (book_id) REFERENCES books(id) ON UPDATE CASCADE ON DELETE CASCADE
-      )
-    ''');
+  CREATE TABLE bookmarks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    book_id INTEGER NOT NULL,
+    chapter_index REAL NOT NULL,
+    position REAL NOT NULL DEFAULT 0.0,
+    char_offset INTEGER NOT NULL,
+    note TEXT,           
+    title TEXT,          
+    color INTEGER,       
+    FOREIGN KEY (book_id) REFERENCES books(id) ON UPDATE CASCADE ON DELETE CASCADE
+  )
+''');
 
     await db.execute('''
       CREATE TABLE quotes (
@@ -192,33 +193,18 @@ class DatabaseHelper {
   }
 
   // --- Закладки ---
-  Future<int> addBookmarkWithPosition(
-      int bookId, ReadingPosition pos, String note) async {
+  Future<int> addBookmarkWithPosition(int bookId, ReadingPosition pos,
+      String title, String note, int color) async {
     final db = await database;
     return await db.insert('bookmarks', {
       'book_id': bookId,
       'chapter_index': pos.chapterIndex,
       'position': pos.position,
       'char_offset': pos.charOffset,
-      'selected_text': pos.selectedText,
+      'title': title,
       'note': note,
+      'color': color,
     });
-  }
-
-  Future<List<ReadingPosition>> getBookmarksWithPosition(int bookId) async {
-    final db = await database;
-    final maps =
-        await db.query('bookmarks', where: 'book_id = ?', whereArgs: [bookId]);
-    return maps
-        .map((m) => ReadingPosition(
-              id: m['id'] as int,
-              chapterIndex: (m['chapter_index'] as num).toDouble(),
-              position: (m['position'] as num? ?? 0.0).toDouble(),
-              charOffset: m['char_offset'] as int,
-              selectedText: m['quote_text'] as String?,
-              comment: m['comment'] as String?,
-            ))
-        .toList();
   }
 
   // --- Цитаты ---
@@ -233,6 +219,30 @@ class DatabaseHelper {
       'quote_text': text,
       'comment': comment,
     });
+  }
+
+  // Обновление существующей закладки
+  Future<int> updateBookmark(ReadingPosition bookmark) async {
+    final db = await database;
+    return await db.update(
+      'bookmarks',
+      {
+        'title': bookmark.title,
+        'note': bookmark.note,
+        'color': bookmark.color,
+        'char_offset': bookmark.charOffset,
+      },
+      where: 'id = ?',
+      whereArgs: [bookmark.id],
+    );
+  }
+
+  // Обновленный метод получения закладок (с учетом новых полей)
+  Future<List<ReadingPosition>> getBookmarksWithPosition(int bookId) async {
+    final db = await database;
+    final maps =
+        await db.query('bookmarks', where: 'book_id = ?', whereArgs: [bookId]);
+    return maps.map((m) => ReadingPosition.fromMap(m)).toList();
   }
 
   // --- Обновление комментария у существующей цитаты ---

@@ -95,7 +95,8 @@ class _BookmarksScreenState extends ConsumerState<BookmarksScreen> {
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFFEDE7D9),
-        title: const Text('Удалить?', style: TextStyle(color: Color(0xFF4E342E))),
+        title:
+            const Text('Удалить?', style: TextStyle(color: Color(0xFF4E342E))),
         content: const Text('Удалить эту метку навсегда?'),
         actions: [
           TextButton(
@@ -120,47 +121,53 @@ class _BookmarksScreenState extends ConsumerState<BookmarksScreen> {
     final pos = bookmarkData['bookmark'] as ReadingPosition;
     final book = bookmarkData['book'] as BookEntity;
 
+    // Берем цвет из базы или ставим дефолтный
+    final Color bookmarkColor =
+        pos.color != null ? Color(pos.color!) : const Color(0xFF7B5E57);
+
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 6.0),
       decoration: BoxDecoration(
         color: const Color(0xFFF5F1EB),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: const Color(0xFFD7CCC8)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 4,
-            offset: const Offset(0, 2),
-          ),
-        ],
       ),
       child: ListTile(
-        leading: const CircleAvatar(
-          backgroundColor: Color(0xFFD7CCC8),
-          child: Icon(Icons.bookmark, color: Color(0xFF7B5E57), size: 20),
+        // Используем цвет закладки в ведущей иконке
+        leading: CircleAvatar(
+          backgroundColor: bookmarkColor.withOpacity(0.2),
+          child: Icon(Icons.bookmark, color: bookmarkColor, size: 20),
         ),
+        // Отображаем заголовок, а не текст
         title: Text(
-          pos.selectedText?.isNotEmpty == true ? pos.selectedText! : "Закладка",
-          style: const TextStyle(color: Color(0xFF4E342E), fontSize: 14),
-          maxLines: 3,
-          overflow: TextOverflow.ellipsis,
+          pos.title?.isNotEmpty == true ? pos.title! : "Без названия",
+          style: const TextStyle(
+              color: Color(0xFF4E342E), fontWeight: FontWeight.bold),
         ),
-        subtitle: Text(
-          '${book.title} • Глава ${pos.chapterIndex.toInt() + 1}',
-          style: const TextStyle(color: Color(0xFF8D6E63), fontSize: 11),
+        // Отображаем описание в подзаголовке
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (pos.note?.isNotEmpty == true) ...[
+              Text(pos.note!,
+                  style:
+                      const TextStyle(color: Color(0xFF4E342E), fontSize: 12)),
+              const SizedBox(height: 2),
+            ],
+            Text(
+              'Глава ${pos.chapterIndex.toInt() + 1}',
+              style: const TextStyle(color: Color(0xFF8D6E63), fontSize: 11),
+            ),
+          ],
         ),
         trailing: PopupMenuButton<String>(
           icon: const Icon(Icons.more_vert, color: Color(0xFF7B5E57)),
           onSelected: (val) {
             if (val == 'delete') {
               _deleteBookmark(bookmarkData);
-            } else if (val == 'share' && pos.selectedText != null) {
-              Share.share('"${pos.selectedText}" — из книги ${book.title} (${book.author})');
             }
           },
           itemBuilder: (context) => [
-            if (pos.selectedText != null && pos.selectedText!.isNotEmpty)
-              const PopupMenuItem(value: 'share', child: Text('Поделиться')),
             const PopupMenuItem(value: 'delete', child: Text('Удалить')),
           ],
         ),
@@ -183,40 +190,41 @@ class _BookmarksScreenState extends ConsumerState<BookmarksScreen> {
         backgroundColor: const Color(0xFFBCAAA4),
         title: const Text(
           'Мои закладки',
-          style: TextStyle(color: Color(0xFF4E342E), fontWeight: FontWeight.bold),
+          style:
+              TextStyle(color: Color(0xFF4E342E), fontWeight: FontWeight.bold),
         ),
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : grouped.isEmpty
-          ? const Center(child: Text("Закладок нет"))
-          : RefreshIndicator(
-        onRefresh: _loadBookmarks,
-        child: ListView.builder(
-          itemCount: grouped.length,
-          itemBuilder: (context, index) {
-            final title = grouped.keys.elementAt(index);
-            final items = grouped[title]!;
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-                  child: Text(
-                    title,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
-                      color: Color(0xFF4E342E),
-                    ),
+              ? const Center(child: Text("Закладок нет"))
+              : RefreshIndicator(
+                  onRefresh: _loadBookmarks,
+                  child: ListView.builder(
+                    itemCount: grouped.length,
+                    itemBuilder: (context, index) {
+                      final title = grouped.keys.elementAt(index);
+                      final items = grouped[title]!;
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                            child: Text(
+                              title,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                                color: Color(0xFF4E342E),
+                              ),
+                            ),
+                          ),
+                          ...items.map(_buildBookmarkItem),
+                        ],
+                      );
+                    },
                   ),
                 ),
-                ...items.map(_buildBookmarkItem),
-              ],
-            );
-          },
-        ),
-      ),
     );
   }
 }

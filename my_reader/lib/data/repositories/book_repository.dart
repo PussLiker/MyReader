@@ -18,11 +18,11 @@ class BookRepository {
   }
 
   Future<int> addBook(
-      String filePath, {
-        String? categoryOverride,
-        String? titleOverride,
-        String? authorOverride,
-      }) async {
+    String filePath, {
+    String? categoryOverride,
+    String? titleOverride,
+    String? authorOverride,
+  }) async {
     final format = path.extension(filePath).toLowerCase().replaceFirst('.', '');
     String title = titleOverride ?? path.basenameWithoutExtension(filePath);
     String author = authorOverride ?? 'Unknown';
@@ -37,7 +37,9 @@ class BookRepository {
         author = epubBook.Author ?? author;
 
         final metadata = epubBook.Schema?.Package?.Metadata;
-        if (categoryOverride == null && metadata?.Subjects != null && metadata!.Subjects!.isNotEmpty) {
+        if (categoryOverride == null &&
+            metadata?.Subjects != null &&
+            metadata!.Subjects!.isNotEmpty) {
           category = metadata.Subjects!.first;
         }
       } catch (e) {
@@ -47,9 +49,12 @@ class BookRepository {
       try {
         final xmlString = await File(filePath).readAsString();
         final document = XmlDocument.parse(xmlString);
-        final bookTitle = document.findAllElements('book-title').firstOrNull?.text;
-        final authorFirstName = document.findAllElements('first-name').firstOrNull?.text;
-        final authorLastName = document.findAllElements('last-name').firstOrNull?.text;
+        final bookTitle =
+            document.findAllElements('book-title').firstOrNull?.text;
+        final authorFirstName =
+            document.findAllElements('first-name').firstOrNull?.text;
+        final authorLastName =
+            document.findAllElements('last-name').firstOrNull?.text;
         final genre = document.findAllElements('genre').firstOrNull?.text;
 
         title = bookTitle ?? title;
@@ -80,6 +85,7 @@ class BookRepository {
 
     return await databaseHelper.insertBook(book);
   }
+
   Future<void> updateBook(BookEntity book) async {
     await databaseHelper.updateBook(book);
   }
@@ -102,7 +108,8 @@ class BookRepository {
     return await databaseHelper.anyMarkExists(bookId, charOffset);
   }
 
-  Future<void> updateReadingStatus(int bookId, int chapterIndex, double positionPercent) async {
+  Future<void> updateReadingStatus(
+      int bookId, int chapterIndex, double positionPercent) async {
     await databaseHelper.updatePosition(bookId, chapterIndex, positionPercent);
   }
 
@@ -115,8 +122,10 @@ class BookRepository {
   }
 
   // ЗАКЛАДКИ
-  Future<int> addBookmark(int bookId, ReadingPosition position, String note) async {
-    return await databaseHelper.addBookmarkWithPosition(bookId, position, note);
+  Future<int> addBookmark(int bookId, ReadingPosition position, String title,
+      String note, int color) async {
+    return await databaseHelper.addBookmarkWithPosition(
+        bookId, position, title, note, color);
   }
 
   Future<List<ReadingPosition>> getBookmarks(int bookId) async {
@@ -128,8 +137,10 @@ class BookRepository {
   }
 
   // ЦИТАТЫ
-  Future<int> addQuote(int bookId, ReadingPosition position, String quoteText, String? comment) async {
-    return await databaseHelper.addQuoteWithPosition(bookId, position, quoteText, comment);
+  Future<int> addQuote(int bookId, ReadingPosition position, String quoteText,
+      String? comment) async {
+    return await databaseHelper.addQuoteWithPosition(
+        bookId, position, quoteText, comment);
   }
 
   Future<List<ReadingPosition>> getQuotes(int bookId) async {

@@ -2,14 +2,12 @@ import 'package:flutter/material.dart';
 import 'dart:ui';
 
 class SelectionToolbar extends StatelessWidget {
-  final VoidCallback onAddBookmark;
   final VoidCallback onSaveQuote;
   final VoidCallback onShare;
   final VoidCallback onClose;
 
   const SelectionToolbar({
     super.key,
-    required this.onAddBookmark,
     required this.onSaveQuote,
     required this.onShare,
     required this.onClose,
@@ -21,14 +19,17 @@ class SelectionToolbar extends StatelessWidget {
     return Align(
       alignment: Alignment.bottomCenter,
       child: Padding(
-        padding: const EdgeInsets.only(bottom: 24.0), // Отступ чуть выше низа экрана
+        padding: const EdgeInsets.only(bottom: 24.0),
+        // Отступ чуть выше низа экрана
         child: ClipRRect(
           borderRadius: BorderRadius.circular(20),
           child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12), // Эффект размытия стекла detrás
+            filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+            // Эффект размытия стекла detrás
             child: Container(
               height: 64, // Жесткая высота, защищающая от RenderFlex overflow
-              width: MediaQuery.of(context).size.width * 0.9, // 90% от ширины экрана
+              width: MediaQuery.of(context).size.width *
+                  0.9, // 90% от ширины экрана
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   colors: [
@@ -54,11 +55,6 @@ class SelectionToolbar extends StatelessWidget {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                 children: [
-                  _buildAction(
-                    icon: Icons.bookmark_add_rounded,
-                    label: 'Закладка',
-                    onPressed: onAddBookmark,
-                  ),
                   _buildAction(
                     icon: Icons.format_quote_rounded,
                     label: 'Цитата',
@@ -95,7 +91,8 @@ class SelectionToolbar extends StatelessWidget {
     required VoidCallback onPressed,
     bool isClose = false,
   }) {
-    final Color color = isClose ? const Color(0xFF8D6E63) : const Color(0xFF5D4037);
+    final Color color =
+        isClose ? const Color(0xFF8D6E63) : const Color(0xFF5D4037);
 
     return InkWell(
       onTap: onPressed,

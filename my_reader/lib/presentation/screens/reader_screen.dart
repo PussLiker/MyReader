@@ -53,21 +53,6 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   Key _textKey = UniqueKey();
   final GlobalKey _richTextKey = GlobalKey();
 
-  void _scrollListener() {
-    if (_scrollController.hasClients) {
-      final max = _scrollController.position.maxScrollExtent;
-      final current = _scrollController.offset;
-      final newProgress = max > 0 ? (current / max) : 0.0;
-
-      if ((newProgress - _currentChapterProgress).abs() > 0.01) {
-        // Оптимизация частоты обновлений
-        setState(() {
-          _currentChapterProgress = newProgress;
-        });
-      }
-    }
-  }
-
   double _getCurrentScrollPercent() {
     if (_scrollController.hasClients) {
       final max = _scrollController.position.maxScrollExtent;
@@ -135,8 +120,11 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   void initState() {
     super.initState();
     _scrollController = ScrollController();
-    // Используем ОДИН метод для всех задач скролла
-    _scrollController.addListener(_updateProgressBar);
+    _scrollController.addListener(() {
+      _updateProgressBar(); // Твоя старая логика
+      if (mounted) setState(() {}); // <-- Обязательно для перерисовки маркеров
+    });
+
     _loadBook();
   }
 
@@ -312,32 +300,6 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     });
   }
 
-  void _scrollToCharOffset(int charOffset) {
-    if (charOffset <= 0) return;
-
-    final chapter = _currentChapter;
-    if (chapter == null) return;
-
-    final textLength = chapter.content.length;
-    if (textLength == 0) return;
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      Future.delayed(const Duration(milliseconds: 300), () {
-        if (!_scrollController.hasClients) return;
-
-        final textRatio = charOffset / textLength;
-        final maxScroll = _scrollController.position.maxScrollExtent;
-        final targetPosition = (maxScroll * textRatio).clamp(0.0, maxScroll);
-
-        _scrollController.animateTo(
-          targetPosition,
-          duration: const Duration(milliseconds: 800),
-          curve: Curves.easeInOut,
-        );
-      });
-    });
-  }
-
   void _nextChapter() {
     if (_currentChapterIndex < _chapters.length - 1) {
       _goToPosition(_currentChapterIndex + 1.0);
@@ -481,10 +443,13 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
       selectedText: selectedText,
     );
 
+    // Внутри onPressed у кнопки "Сохранить" в диалоге:
     await DatabaseHelper.instance.addBookmarkWithPosition(
-      widget.book.id,
-      position,
-      "Закладка",
+      widget.book.id, // 1. ID книги
+      position, // 2. Объект позиции
+      "Моя закладка", // Название
+      "", // Описание (пустая строка)
+      0xFF7B5E57, // 5. Цвет
     );
 
     await _loadBookmarksAndQuotes();
@@ -680,7 +645,6 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
       );
       return;
     }
-
     showDialog(
       context: context,
       builder: (context) => Dialog(
@@ -712,10 +676,10 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                             : 'Глава ${bookmark.chapterIndex.floor() + 1}';
 
                     return ListTile(
-                      leading:
-                          const Icon(Icons.bookmark, color: Color(0xFF7B5E57)),
+                      leading: Icon(Icons.bookmark,
+                          color: Color(bookmark.color ?? 0xFFEF9A9A)),
                       title: Text(
-                        bookmark.selectedText ?? 'Закладка',
+                        bookmark.title ?? 'Закладка',
                         style: const TextStyle(color: Color(0xFF4E342E)),
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
@@ -1154,13 +1118,6 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                   left: 0,
                   right: 0,
                   child: SelectionToolbar(
-                    onAddBookmark: () {
-                      _addBookmarkAtSelection();
-                      setState(() {
-                        _showSelectionToolbar = false;
-                        _isTextSelected = false;
-                      });
-                    },
                     onSaveQuote: () {
                       _saveQuoteAtSelection();
                       setState(() {
@@ -1456,13 +1413,6 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                   left: 0,
                   right: 0,
                   child: SelectionToolbar(
-                    onAddBookmark: () {
-                      _addBookmarkAtSelection();
-                      setState(() {
-                        _showSelectionToolbar = false;
-                        _isTextSelected = false;
-                      });
-                    },
                     onSaveQuote: () {
                       _saveQuoteAtSelection();
                       setState(() {
@@ -1495,242 +1445,173 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     );
   }
 
-  void _updateMarkInDatabase(dynamic mark) async {
-    print("Попытка сохранить комментарий для ID: ${mark.id}");
+  int _getVisibleCharOffset() {
+    if (!_scrollController.hasClients) return 0;
 
-    if (mark.id != null) {
-      int rowsAffected = await DatabaseHelper.instance
-          .updateQuoteComment(mark.id!, mark.comment);
-      print("Обновлено строк в БД: $rowsAffected");
-    } else {
-      print(
-          "Ошибка: ID цитаты равен null! Нам не у чего обновлять комментарий.");
-      // Альтернативный вариант: если ID нет, возможно, эту цитату нужно СНАЧАЛА создать в базе?
-      // Например:
-      // int newId = await DatabaseHelper.instance.addQuoteWithPosition(_currentBookId, mark, mark.selectedText ?? '', mark.comment);
-      // mark.id = newId;
-    }
+    // Примерная логика: вычисляем офсет на основе процента прокрутки
+    // Если у тебя есть более точный способ (через GlobalKey или RenderBox), лучше использовать его
+    final double maxScroll = _scrollController.position.maxScrollExtent;
+    if (maxScroll <= 0) return 0;
+
+    final double progress = _scrollController.offset / maxScroll;
+    final int totalChars = _currentChapter?.content.length ?? 0;
+
+    return (totalChars * progress).toInt();
   }
 
-  void _handleMarkTap(ReadingPosition mark) {
-    showModalBottomSheet(
+  double _calculateTopOffset(int charOffset) {
+    if (!_scrollController.hasClients) return 0;
+
+    // 1. Общее количество символов в главе
+    final int totalChars = _currentChapter?.content.length ?? 1;
+
+    // 2. Общая высота скроллируемого контента (не экрана, а всего текста)
+    final double totalScrollHeight =
+        _scrollController.position.maxScrollExtent +
+            _scrollController.position.viewportDimension;
+
+    // 3. Где маркер должен быть относительно начала всей главы (в пикселях)
+    final double markerAbsolutePosition =
+        (charOffset / totalChars) * totalScrollHeight;
+
+    // 4. Вычитаем текущий скролл, чтобы получить позицию относительно верха экрана
+    final double relativePosition =
+        markerAbsolutePosition - _scrollController.offset;
+
+    return relativePosition;
+  }
+
+  Future<void> _showEditBookmarkDialog(ReadingPosition bookmark) async {
+    final titleController = TextEditingController(text: bookmark.title);
+    final noteController = TextEditingController(text: bookmark.note);
+    int selectedColorValue = bookmark.color ?? 0xFF7B5E57;
+
+    // Эстетичная палитра
+    final List<Color> palette = [
+      const Color(0xFFEF9A9A), // Мягкий пыльно-розовый
+      const Color(0xFFFFF59D), // Нежный кремово-желтый
+      const Color(0xFFA5D6A7), // Светлый мятный
+      const Color(0xFF90CAF9), // Приглушенный небесно-голубой
+      const Color(0xFFCE93D8), // Легкий лавандовый
+    ];
+
+    await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) {
-        return SafeArea(
-          child: Container(
-            constraints: BoxConstraints(
-              maxHeight: MediaQuery.of(context).size.height * 0.45,
-            ),
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-            decoration: const BoxDecoration(
-              color: Color(0xFFEDE7D9),
-              borderRadius: BorderRadius.vertical(
-                top: Radius.circular(18),
-              ),
-            ),
-            child: Column(
-              children: [
-                // "ручка"
-                Container(
-                  width: 40,
-                  height: 4,
-                  margin: const EdgeInsets.only(bottom: 12),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFBCAAA4),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                ),
-
-                const Text(
-                  'Цитата',
+      backgroundColor: const Color(0xFFF8F4F0),
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(25))),
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setModalState) => Padding(
+          // padding с viewInsets.bottom поднимает меню над клавиатурой
+          padding: EdgeInsets.only(
+              bottom: MediaQuery.of(context).viewInsets.bottom + 45,
+              top: 25,
+              left: 25,
+              right: 25),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            // Меню минимально по размеру контента
+            children: [
+              const Text("Редактирование",
                   style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFF4E342E),
-                  ),
-                ),
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF4E342E))),
+              const SizedBox(height: 15),
+              TextField(
+                  controller: titleController,
+                  decoration: const InputDecoration(
+                      labelText: 'Название', border: OutlineInputBorder())),
+              const SizedBox(height: 10),
+              TextField(
+                  controller: noteController,
+                  decoration: const InputDecoration(
+                      labelText: 'Описание', border: OutlineInputBorder())),
+              const SizedBox(height: 20),
 
-                const SizedBox(height: 12),
-
-                // ВАЖНО: вся прокручиваемая часть
-                Expanded(
-                  child: SingleChildScrollView(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // ЦИТАТА
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.all(14),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFD7CCC8),
-                            borderRadius: BorderRadius.circular(10),
-                            border: const Border(
-                              left: BorderSide(
-                                color: Color(0xFF8D6E63),
-                                width: 4,
-                              ),
-                            ),
-                          ),
-                          child: Text(
-                            mark.selectedText ?? '',
-                            style: const TextStyle(
-                              fontStyle: FontStyle.italic,
-                              color: Color(0xFF3E2F2B),
-                              height: 1.4,
-                            ),
-                          ),
-                        ),
-
-                        const SizedBox(height: 14),
-
-                        // КОММЕНТАРИЙ
-                        if ((mark.comment ?? '').trim().isNotEmpty) ...[
-                          const Text(
-                            'Комментарий',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              color: Color(0xFF4E342E),
-                            ),
-                          ),
-                          const SizedBox(height: 6),
-                          Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.all(12),
+              // Палитра
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: palette
+                    .map((color) => GestureDetector(
+                          onTap: () => setModalState(
+                              () => selectedColorValue = color.value),
+                          child: Container(
+                            width: 40,
+                            height: 40,
                             decoration: BoxDecoration(
-                              color: const Color(0xFFF5EFE6),
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: Text(
-                              mark.comment!,
-                              style: const TextStyle(
-                                color: Color(0xFF4E342E),
-                                height: 1.3,
-                              ),
+                              color: color,
+                              shape: BoxShape.circle,
+                              border: selectedColorValue == color.value
+                                  ? Border.all(
+                                      color: const Color(0xFF4E342E), width: 3)
+                                  : null,
+                              boxShadow: const [
+                                BoxShadow(color: Colors.black12, blurRadius: 4)
+                              ],
                             ),
                           ),
-                          const SizedBox(height: 14),
-                        ],
+                        ))
+                    .toList(),
+              ),
 
-                        // кнопки
-                        Row(
-                          children: [
-                            Expanded(
-                              child: OutlinedButton(
-                                onPressed: () => Navigator.pop(context),
-                                style: OutlinedButton.styleFrom(
-                                  foregroundColor: const Color(0xFF7B5E57),
-                                  side: const BorderSide(
-                                      color: Color(0xFF7B5E57)),
-                                ),
-                                child: const Text('Закрыть'),
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: ElevatedButton(
-                                onPressed: () {
-                                  Navigator.pop(context);
-                                  _shareQuote(mark.selectedText ?? '');
-                                },
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: const Color(0xFF8D6E63),
-                                  foregroundColor: Colors.white,
-                                ),
-                                child: const Text('Поделиться'),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
+              const SizedBox(height: 25),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF8D6E63),
+                  foregroundColor: Colors.white,
+                  minimumSize: const Size(double.infinity, 50),
                 ),
-              ],
-            ),
+                onPressed: () async {
+                  final updated = bookmark.copyWith(
+                    title: titleController.text,
+                    note: noteController.text,
+                    color: selectedColorValue,
+                  );
+                  await DatabaseHelper.instance.updateBookmark(updated);
+                  Navigator.pop(context);
+                  await _refreshUI();
+                },
+                child: const Text('Сохранить изменения'),
+              ),
+            ],
           ),
-        );
-      },
+        ),
+      ),
     );
   }
 
-  void _handleLongPress() {
-    if (!_selection.isValid || _selection.start == _selection.end) {
-      return;
-    }
+  List<Widget> _renderBookmarkMarkers() {
+    final viewportHeight = _scrollController.hasClients
+        ? _scrollController.position.viewportDimension
+        : 0.0;
 
-    final chapter = _currentChapter;
-    if (chapter == null) return;
+    return _bookmarks
+        .where((b) => b.chapterIndex == _currentChapterIndex)
+        .map((bookmark) {
+      final top = _calculateTopOffset(bookmark.charOffset);
 
-    final selectedText =
-        chapter.content.substring(_selection.start, _selection.end).trim();
+      // Если маркер за пределами экрана — возвращаем пустой виджет (не рисуем)
+      if (top < 0 || top > viewportHeight) return const SizedBox.shrink();
 
-    if (selectedText.isEmpty) return;
-
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: const Color(0xFFEDE7D9),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (context) {
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFBCAAA4),
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  selectedText,
-                  style: const TextStyle(
-                    fontStyle: FontStyle.italic,
-                    color: Color(0xFF3E2F2B),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: () {
-                          Navigator.pop(context);
-                          _addBookmarkAtSelection();
-                        },
-                        child: const Text('Закладка'),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF8D6E63),
-                        ),
-                        onPressed: () async {
-                          Navigator.pop(context);
-                          await _saveQuoteAtSelection();
-                        },
-                        child: const Text('Цитата'),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
+      return Positioned(
+        right: 0,
+        top: top,
+        child: GestureDetector(
+          onTap: () => _showEditBookmarkDialog(bookmark),
+          child: Container(
+            width: 6,
+            height: 24,
+            decoration: BoxDecoration(
+              color: Color(bookmark.color ?? 0xFF7B5E57),
+              borderRadius:
+                  const BorderRadius.horizontal(left: Radius.circular(3)),
             ),
           ),
-        );
-      },
-    );
+        ),
+      );
+    }).toList();
   }
 
   Widget _buildContent() {
@@ -1745,12 +1626,6 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
       return _buildEpubContent(chapter);
     } else {
       return _buildTextContent(chapter);
-    }
-  }
-
-  void _handleInitialPosition() {
-    if (widget.initialCharOffset != null && _chapters.isNotEmpty) {
-      _scrollToCharOffset(widget.initialCharOffset!);
     }
   }
 
@@ -1809,11 +1684,6 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
             onPressed: _showChaptersDialog,
             tooltip: 'Оглавление',
           ),
-          IconButton(
-            icon: const Icon(Icons.text_fields, color: Color(0xFF7B5E57)),
-            onPressed: _showSettings,
-            tooltip: 'Настройки текста',
-          ),
         ],
       ),
       body: GestureDetector(
@@ -1825,12 +1695,17 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
             });
           }
         },
-        child: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 150),
-          transitionBuilder: (Widget child, Animation<double> animation) {
-            return FadeTransition(opacity: animation, child: child);
-          },
-          child: _buildContent(),
+        child: Stack(
+          children: [
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 150),
+              transitionBuilder: (Widget child, Animation<double> animation) {
+                return FadeTransition(opacity: animation, child: child);
+              },
+              child: _buildContent(),
+            ),
+            ..._renderBookmarkMarkers()
+          ],
         ),
       ),
       bottomNavigationBar: BottomAppBar(
@@ -1841,6 +1716,11 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
             IconButton(
               onPressed: _currentChapterIndex > 0 ? _previousChapter : null,
               icon: const Icon(Icons.arrow_back, color: Color(0xFF7B5E57)),
+            ),
+            IconButton(
+              icon: const Icon(Icons.text_fields_outlined,
+                  color: Color(0xFF7B5E57)),
+              onPressed: _showSettings,
             ),
             Expanded(
               child: InkWell(
@@ -1876,6 +1756,11 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
               ),
             ),
             IconButton(
+              onPressed: _showAddBookmarkDialog,
+              icon: const Icon(Icons.bookmark_add_outlined,
+                  color: Color(0xFF7B5E57)),
+            ),
+            IconButton(
               onPressed: _currentChapterIndex < _chapters.length - 1
                   ? _nextChapter
                   : null,
@@ -1883,6 +1768,125 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Future<void> _showAddBookmarkDialog() async {
+    final titleController = TextEditingController();
+    final noteController = TextEditingController();
+
+    // Эстетичная палитра (цвета в стиле твоего приложения)
+    final List<Color> palette = [
+      const Color(0xFFEF9A9A), // Мягкий пыльно-розовый
+      const Color(0xFFFFF59D), // Нежный кремово-желтый
+      const Color(0xFFA5D6A7), // Светлый мятный
+      const Color(0xFF90CAF9), // Приглушенный небесно-голубой
+      const Color(0xFFCE93D8), // Легкий лавандовый
+    ];
+
+    int selectedColorValue = palette[0].value;
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFFF8F4F0),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(25)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (BuildContext context, StateSetter setModalState) {
+          return Padding(
+            padding: EdgeInsets.only(
+                bottom: MediaQuery.of(context).viewInsets.bottom + 45,
+                top: 25,
+                left: 25,
+                right: 25),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text("Новая закладка",
+                    style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF4E342E))),
+                const SizedBox(height: 15),
+                TextField(
+                  controller: titleController,
+                  decoration: const InputDecoration(
+                      labelText: 'Название', border: OutlineInputBorder()),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: noteController,
+                  decoration: const InputDecoration(
+                      labelText: 'Описание', border: OutlineInputBorder()),
+                ),
+                const SizedBox(height: 20),
+                // Эстетичная палитра
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: palette
+                      .map((color) => GestureDetector(
+                            onTap: () => setModalState(
+                                () => selectedColorValue = color.value),
+                            child: Container(
+                              width: 40,
+                              height: 40,
+                              decoration: BoxDecoration(
+                                color: color,
+                                shape: BoxShape.circle,
+                                border: selectedColorValue == color.value
+                                    ? Border.all(
+                                        color: const Color(0xFF4E342E),
+                                        width: 3)
+                                    : null,
+                                boxShadow: const [
+                                  BoxShadow(
+                                      color: Colors.black12, blurRadius: 4)
+                                ],
+                              ),
+                            ),
+                          ))
+                      .toList(),
+                ),
+                const SizedBox(height: 25),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF8D6E63),
+                    foregroundColor: Colors.white,
+                    minimumSize: const Size(double.infinity, 50),
+                  ),
+                  onPressed: () async {
+                    // ЛОГИКА СОХРАНЕНИЯ
+                    final newBookmark = ReadingPosition(
+                      chapterIndex: _currentChapterIndex,
+                      position: _getCurrentScrollPercent(),
+                      charOffset: _getVisibleCharOffset(),
+                      title: titleController.text.isEmpty
+                          ? "Закладка"
+                          : titleController.text,
+                      note: noteController.text,
+                      color: selectedColorValue,
+                    );
+
+                    await DatabaseHelper.instance.addBookmarkWithPosition(
+                      widget.book.id!,
+                      newBookmark,
+                      newBookmark.title ?? 'Закладка',
+                      newBookmark.note ?? "",
+                      newBookmark.color!,
+                    );
+
+                    Navigator.pop(context);
+                    await _refreshUI(); // Обновление маркеров на экране
+                  },
+                  child: const Text('Сохранить'),
+                ),
+              ],
+            ),
+          );
+        },
       ),
     );
   }
@@ -1897,23 +1901,6 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     _scrollController.removeListener(_updateProgressBar);
     _scrollController.dispose();
     super.dispose();
-  }
-
-  Future<void> _forceSaveCurrentPosition() async {
-    if (_scrollController.hasClients) {
-      final max = _scrollController.position.maxScrollExtent;
-      final current = _scrollController.offset;
-      final percent = max > 0 ? (current / max) : 0.0;
-
-      // Вызываем напрямую БД без таймеров
-      await DatabaseHelper.instance.updatePosition(
-        widget.book.id,
-        _currentChapterIndex.toInt(),
-        percent,
-      );
-      print(
-          "Позиция принудительно сохранена: глава ${_currentChapterIndex.toInt()}, $percent%");
-    }
   }
 
   Future<void> _refreshUI() async {
