@@ -6,6 +6,9 @@ import 'package:my_reader/presentation/providers/book_provider.dart';
 import 'package:my_reader/presentation/screens/reader_screen.dart';
 import 'package:share_plus/share_plus.dart';
 
+import '../../app_colors.dart';
+import '../widgets/ThemeToggleButton.dart';
+
 class BookmarksScreen extends ConsumerStatefulWidget {
   const BookmarksScreen({super.key});
 
@@ -86,6 +89,7 @@ class _BookmarksScreenState extends ConsumerState<BookmarksScreen> {
   }
 
   Future<void> _deleteBookmark(Map<String, dynamic> bookmarkData) async {
+    final colors = Theme.of(context).extension<AppColors>()!;
     final repo = ref.read(bookRepositoryProvider);
     final pos = bookmarkData['bookmark'] as ReadingPosition;
 
@@ -94,9 +98,8 @@ class _BookmarksScreenState extends ConsumerState<BookmarksScreen> {
     final result = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFFEDE7D9),
-        title:
-            const Text('Удалить?', style: TextStyle(color: Color(0xFF4E342E))),
+        backgroundColor: colors.background,
+        title: Text('Удалить?', style: TextStyle(color: colors.mainText)),
         content: const Text('Удалить эту метку навсегда?'),
         actions: [
           TextButton(
@@ -117,67 +120,11 @@ class _BookmarksScreenState extends ConsumerState<BookmarksScreen> {
     }
   }
 
-  Widget _buildBookmarkItem(Map<String, dynamic> bookmarkData) {
-    final pos = bookmarkData['bookmark'] as ReadingPosition;
-    final book = bookmarkData['book'] as BookEntity;
-
-    // Берем цвет из базы или ставим дефолтный
-    final Color bookmarkColor =
-        pos.color != null ? Color(pos.color!) : const Color(0xFF7B5E57);
-
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 6.0),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF5F1EB),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFD7CCC8)),
-      ),
-      child: ListTile(
-        // Используем цвет закладки в ведущей иконке
-        leading: CircleAvatar(
-          backgroundColor: bookmarkColor.withOpacity(0.2),
-          child: Icon(Icons.bookmark, color: bookmarkColor, size: 20),
-        ),
-        // Отображаем заголовок, а не текст
-        title: Text(
-          pos.title?.isNotEmpty == true ? pos.title! : "Без названия",
-          style: const TextStyle(
-              color: Color(0xFF4E342E), fontWeight: FontWeight.bold),
-        ),
-        // Отображаем описание в подзаголовке
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (pos.note?.isNotEmpty == true) ...[
-              Text(pos.note!,
-                  style:
-                      const TextStyle(color: Color(0xFF4E342E), fontSize: 12)),
-              const SizedBox(height: 2),
-            ],
-            Text(
-              'Глава ${pos.chapterIndex.toInt() + 1}',
-              style: const TextStyle(color: Color(0xFF8D6E63), fontSize: 11),
-            ),
-          ],
-        ),
-        trailing: PopupMenuButton<String>(
-          icon: const Icon(Icons.more_vert, color: Color(0xFF7B5E57)),
-          onSelected: (val) {
-            if (val == 'delete') {
-              _deleteBookmark(bookmarkData);
-            }
-          },
-          itemBuilder: (context) => [
-            const PopupMenuItem(value: 'delete', child: Text('Удалить')),
-          ],
-        ),
-        onTap: () => _goToBookmark(bookmarkData),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
+    // Получаем доступ к нашим цветам
+    final colors = Theme.of(context).extension<AppColors>()!;
+
     final grouped = <String, List<Map<String, dynamic>>>{};
     for (final b in _bookmarks) {
       final title = (b['book'] as BookEntity).title;
@@ -185,21 +132,28 @@ class _BookmarksScreenState extends ConsumerState<BookmarksScreen> {
     }
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF8F4F0),
+      backgroundColor: colors.background, // Используем фоновый цвет темы
       appBar: AppBar(
-        backgroundColor: const Color(0xFFBCAAA4),
-        title: const Text(
+        backgroundColor: colors.accent,
+        title: Text(
           'Мои закладки',
-          style:
-              TextStyle(color: Color(0xFF4E342E), fontWeight: FontWeight.bold),
+          style: TextStyle(color: colors.mainText, fontWeight: FontWeight.bold),
         ),
+        actions: const [
+          ThemeToggleButton(),
+        ],
+        iconTheme: IconThemeData(color: colors.mainText),
       ),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
+          ? Center(child: CircularProgressIndicator(color: colors.accent))
           : grouped.isEmpty
-              ? const Center(child: Text("Закладок нет"))
+              ? Center(
+                  child: Text("Закладок нет",
+                      style: TextStyle(color: colors.mainText)))
               : RefreshIndicator(
                   onRefresh: _loadBookmarks,
+                  color: colors.accent,
+                  backgroundColor: colors.background,
                   child: ListView.builder(
                     itemCount: grouped.length,
                     itemBuilder: (context, index) {
@@ -212,19 +166,67 @@ class _BookmarksScreenState extends ConsumerState<BookmarksScreen> {
                             padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
                             child: Text(
                               title,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontWeight: FontWeight.bold,
                                 fontSize: 16,
-                                color: Color(0xFF4E342E),
+                                color: colors.mainText,
                               ),
                             ),
                           ),
-                          ...items.map(_buildBookmarkItem),
+                          ...items
+                              .map((item) => _buildBookmarkItem(item, colors)),
                         ],
                       );
                     },
                   ),
                 ),
+    );
+  }
+
+// Передаем colors в метод, чтобы он их использовал
+  Widget _buildBookmarkItem(
+      Map<String, dynamic> bookmarkData, AppColors colors) {
+    final pos = bookmarkData['bookmark'] as ReadingPosition;
+    final book = bookmarkData['book'] as BookEntity;
+    final Color bookmarkColor =
+        pos.color != null ? Color(pos.color!) : colors.secondaryText;
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 6.0),
+      decoration: BoxDecoration(
+        color: colors.cardBackground, // Используем фоновый цвет карточки темы
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: colors.border),
+      ),
+      child: ListTile(
+        leading: CircleAvatar(
+          backgroundColor: bookmarkColor.withOpacity(0.2),
+          child: Icon(Icons.bookmark, color: bookmarkColor, size: 20),
+        ),
+        title: Text(
+          pos.title?.isNotEmpty == true ? pos.title! : "Без названия",
+          style: TextStyle(color: colors.mainText, fontWeight: FontWeight.bold),
+        ),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (pos.note?.isNotEmpty == true) ...[
+              Text(pos.note!,
+                  style: TextStyle(color: colors.mainText, fontSize: 12)),
+              const SizedBox(height: 2),
+            ],
+            Text(
+              'Глава ${pos.chapterIndex.toInt() + 1}',
+              style: TextStyle(color: colors.secondaryText, fontSize: 11),
+            ),
+          ],
+        ),
+        trailing: IconButton(
+          icon: Icon(Icons.delete, color: colors.mainText),
+          onPressed: () => _deleteBookmark(bookmarkData),
+        ),
+        onTap: () => _goToBookmark(bookmarkData),
+      ),
     );
   }
 }

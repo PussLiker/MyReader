@@ -7,6 +7,9 @@ import 'package:my_reader/presentation/screens/add_book_screen.dart';
 import 'package:my_reader/presentation/screens/reader_screen.dart';
 import 'package:my_reader/presentation/screens/bookmarks_screen.dart';
 import 'package:my_reader/presentation/screens/quotes_screen.dart';
+import 'package:my_reader/app_colors.dart';
+
+import '../widgets/ThemeToggleButton.dart';
 
 class LibraryScreen extends ConsumerStatefulWidget {
   const LibraryScreen({super.key});
@@ -18,7 +21,6 @@ class LibraryScreen extends ConsumerStatefulWidget {
 class _LibraryScreenState extends ConsumerState<LibraryScreen> {
   String _searchQuery = '';
   String? _selectedCategory;
-  final List<String> _categories = ['Все категории'];
   final TextEditingController _searchController = TextEditingController();
   bool _isDeleting = false;
   final FocusNode _searchFocusNode = FocusNode();
@@ -26,33 +28,22 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
   @override
   void initState() {
     super.initState();
+    _loadCategories();
   }
 
   Future<void> _loadCategories() async {
     try {
       final repo = ref.read(bookRepositoryProvider);
       final allCategories = await repo.getCategories();
-
-      // УБИРАЕМ фильтрацию - показываем ВСЕ категории
-      setState(() {
-        _categories
-          ..clear()
-          ..addAll(['Все категории', ...allCategories]);
-
-        // Проверяем, существует ли выбранная категория в обновленном списке
-        if (_selectedCategory != null &&
-            _selectedCategory != 'Все категории' &&
-            !allCategories.contains(_selectedCategory)) {
-          _selectedCategory = null;
-        }
-      });
+      if (mounted) {
+        setState(() {});
+      }
     } catch (e) {
-      print('Error loading categories: $e');
+      debugPrint('Error loading categories: $e');
     }
   }
 
   Future<void> _refreshData() async {
-    // Инвалидируем все провайдеры книг
     ref.invalidate(getBooksProvider(_selectedCategory));
     ref.invalidate(getBooksProvider(null));
     ref.invalidate(getAllBooksProvider);
@@ -60,7 +51,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
     await _loadCategories();
   }
 
-  Future<void> _editBook(BookEntity book) async {
+  Future<void> _editBook(BookEntity book, AppColors colors) async {
     try {
       final result = await Navigator.push(
         context,
@@ -69,72 +60,51 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
 
       if (result is Map && result['result'] == true) {
         await _refreshData();
-
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: const Text('Книга успешно обновлена'),
-              backgroundColor: const Color(0xFF8D6E63),
+              backgroundColor: colors.accent,
               behavior: SnackBarBehavior.floating,
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
+                  borderRadius: BorderRadius.circular(8)),
             ),
           );
         }
       }
     } catch (e) {
-      print('Error editing book: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Ошибка при обновлении книги: $e'),
             backgroundColor: Colors.red,
             behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8),
-            ),
           ),
         );
       }
     }
   }
 
-  Future<void> _deleteBook(BookEntity book) async {
+  Future<void> _deleteBook(BookEntity book, AppColors colors) async {
     if (_isDeleting) return;
-
     _isDeleting = true;
     try {
       final repo = ref.read(bookRepositoryProvider);
       await repo.deleteBook(book.id);
-
-      // Обновляем данные
       await _refreshData();
-
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: const Text('Книга успешно удалена'),
-            backgroundColor: const Color(0xFF8D6E63),
+            backgroundColor: colors.accent,
             behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8),
-            ),
           ),
         );
       }
     } catch (e) {
-      print('Error deleting book: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Ошибка при удалении книги: $e'),
-            backgroundColor: Colors.red,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8),
-            ),
-          ),
+          SnackBar(content: Text('Ошибка: $e'), backgroundColor: Colors.red),
         );
       }
     } finally {
@@ -142,78 +112,69 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
     }
   }
 
-  Future<void> _showDeleteConfirmation(BookEntity book) async {
+  Future<void> _showDeleteConfirmation(
+      BookEntity book, AppColors colors) async {
     final result = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFFEDE7D9),
-        title: const Text(
-          'Удалить книгу?',
-          style: TextStyle(color: Color(0xFF4E342E)),
-        ),
-        content: Text(
-          'Вы уверены, что хотите удалить "${book.title}"?',
-          style: const TextStyle(color: Color(0xFF4E342E)),
-        ),
+        backgroundColor: colors.background,
+        title: Text('Удалить книгу?', style: TextStyle(color: colors.mainText)),
+        content: Text('Вы уверены, что хотите удалить "${book.title}"?',
+            style: TextStyle(color: colors.mainText)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text(
-              'Отмена',
-              style: TextStyle(color: Color(0xFF4E342E)),
-            ),
+            child: Text('Отмена', style: TextStyle(color: colors.mainText)),
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text(
-              'Удалить',
-              style: TextStyle(color: Color(0xFF4E342E)),
-            ),
+            child: const Text('Удалить', style: TextStyle(color: Colors.red)),
           ),
         ],
       ),
     );
 
     if (result == true) {
-      await _deleteBook(book);
+      await _deleteBook(book, colors);
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).extension<AppColors>()!;
     final booksAsync = ref.watch(getAllBooksProvider);
 
     return Scaffold(
-      backgroundColor: const Color(0xFFEDE7D9),
+      backgroundColor: colors.background,
       appBar: AppBar(
-        backgroundColor: const Color(0xFFBCAAA4),
-        title: const Text(
+        backgroundColor: colors.accent,
+        title: Text(
           'Моя библиотека',
-          style: TextStyle(
-              color: Color(0xFF4E342E),
-              fontWeight: FontWeight.w600),
-          ),
+          style: TextStyle(color: colors.mainText, fontWeight: FontWeight.w600),
+        ),
+        actions: const [
+          ThemeToggleButton(),
+        ],
         leading: Builder(
           builder: (context) => IconButton(
-            icon: const Icon(Icons.menu, color: Color(0xFF4E342E)),
+            icon: Icon(Icons.menu, color: colors.mainText),
             onPressed: () => Scaffold.of(context).openDrawer(),
           ),
         ),
-
       ),
-      drawer: _buildDrawer(),
+      drawer: _buildDrawer(colors),
       body: Column(
         children: [
-          _buildSearchAndFilter(),
+          _buildSearchAndFilter(colors),
           Expanded(
             child: RefreshIndicator(
               onRefresh: _refreshData,
-              backgroundColor: const Color(0xFFEDE7D9),
-              color: const Color(0xFF8D6E63),
+              backgroundColor: colors.background,
+              color: colors.accent,
               child: booksAsync.when(
-                data: (books) => _buildBooksList(books),
-                loading: () => _buildLoadingState(),
-                error: (error, stack) => _buildErrorState(error),
+                data: (books) => _buildBooksList(books, colors),
+                loading: () => _buildLoadingState(colors),
+                error: (error, stack) => _buildErrorState(error, colors),
               ),
             ),
           ),
@@ -222,108 +183,50 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
     );
   }
 
-  Widget _buildDrawer() {
+  Widget _buildDrawer(AppColors colors) {
     return Drawer(
-      backgroundColor: const Color(0xFFEDE7D9),
+      backgroundColor: colors.background,
       child: ListView(
         padding: EdgeInsets.zero,
         children: [
-          const DrawerHeader(
-            decoration: BoxDecoration(
-              color: Color(0xFFBCAAA4),
-            ),
-            child: Text(
-              'Меню',
-              style: TextStyle(
-                color: Color(0xFF4E342E),
-                fontSize: 24,
-              ),
-            ),
+          DrawerHeader(
+            decoration: BoxDecoration(color: colors.accent),
+            child: Text('Меню',
+                style: TextStyle(color: colors.mainText, fontSize: 24)),
           ),
           ListTile(
-            leading: const Icon(Icons.add, color: Color(0xFF7B5E57)),
-            title: const Text(
-              'Добавить книгу',
-              style: TextStyle(color: Color(0xFF4E342E)),
-            ),
+            leading: Icon(Icons.add, color: colors.secondaryText),
+            title: Text('Добавить книгу',
+                style: TextStyle(color: colors.mainText)),
             onTap: () async {
               Navigator.pop(context);
               final result = await Navigator.push(
-                context,
-                MaterialPageRoute(builder: (context) => const AddBookScreen()),
-              );
-              if (result == true) {
-                await _refreshData();
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Книга успешно добавлена'),
-                      backgroundColor: Color(0xFF8D6E63),
-                      behavior: SnackBarBehavior.floating,
-                    ),
-                  );
-                }
-              }
+                  context,
+                  MaterialPageRoute(
+                      builder: (context) => const AddBookScreen()));
+              if (result == true) await _refreshData();
             },
           ),
           ListTile(
-            leading: const Icon(Icons.bookmark, color: Color(0xFF7B5E57)),
-            title: const Text(
-              'Закладки',
-              style: TextStyle(color: Color(0xFF4E342E)),
-            ),
+            leading: Icon(Icons.bookmark, color: colors.secondaryText),
+            title: Text('Закладки', style: TextStyle(color: colors.mainText)),
             onTap: () {
               Navigator.pop(context);
               Navigator.push(
-                context,
-                PageRouteBuilder(
-                  pageBuilder: (context, animation, secondaryAnimation) => const BookmarksScreen(),
-                  transitionsBuilder: (context, animation, secondaryAnimation, child) {
-                    const begin = Offset(0.0, 1.0);
-                    const end = Offset.zero;
-                    const curve = Curves.easeInOut;
-                    final tween = Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
-                    return SlideTransition(
-                      position: animation.drive(tween),
-                      child: FadeTransition(
-                        opacity: animation,
-                        child: child,
-                      ),
-                    );
-                  },
-                  transitionDuration: const Duration(milliseconds: 300),
-                ),
-              );
+                  context,
+                  MaterialPageRoute(
+                      builder: (context) => const BookmarksScreen()));
             },
           ),
           ListTile(
-            leading: const Icon(Icons.format_quote, color: Color(0xFF7B5E57)),
-            title: const Text(
-              'Цитаты',
-              style: TextStyle(color: Color(0xFF4E342E)),
-            ),
+            leading: Icon(Icons.format_quote, color: colors.secondaryText),
+            title: Text('Цитаты', style: TextStyle(color: colors.mainText)),
             onTap: () {
               Navigator.pop(context);
               Navigator.push(
-                context,
-                PageRouteBuilder(
-                  pageBuilder: (context, animation, secondaryAnimation) => const QuotesScreen(),
-                  transitionsBuilder: (context, animation, secondaryAnimation, child) {
-                    const begin = Offset(0.0, 1.0);
-                    const end = Offset.zero;
-                    const curve = Curves.easeInOut;
-                    final tween = Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
-                    return SlideTransition(
-                      position: animation.drive(tween),
-                      child: FadeTransition(
-                        opacity: animation,
-                        child: child,
-                      ),
-                    );
-                  },
-                  transitionDuration: const Duration(milliseconds: 300),
-                ),
-              );
+                  context,
+                  MaterialPageRoute(
+                      builder: (context) => const QuotesScreen()));
             },
           ),
         ],
@@ -331,9 +234,8 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
     );
   }
 
-  Widget _buildSearchAndFilter() {
+  Widget _buildSearchAndFilter(AppColors colors) {
     final categoriesAsync = ref.watch(getCategoriesProvider);
-
     return Padding(
       padding: const EdgeInsets.all(16.0),
       child: Column(
@@ -341,223 +243,125 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
           TextField(
             controller: _searchController,
             focusNode: _searchFocusNode,
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
               hintText: 'Поиск по названию...',
-              hintStyle: TextStyle(color: Color(0xFF8D6E63)),
+              hintStyle: TextStyle(color: colors.secondaryText),
               labelText: 'Поиск',
-              labelStyle: TextStyle(color: Color(0xFF4E342E)),
+              labelStyle: TextStyle(color: colors.mainText),
               border: OutlineInputBorder(
-                borderSide: BorderSide(color: Color(0xFF7B5E57)),
-              ),
+                  borderSide: BorderSide(color: colors.border)),
               enabledBorder: OutlineInputBorder(
-                borderSide: BorderSide(color: Color(0xFF7B5E57)),
-              ),
+                  borderSide: BorderSide(color: colors.border)),
               focusedBorder: OutlineInputBorder(
-                borderSide: BorderSide(color: Color(0xFF4E342E)),
-              ),
-              prefixIcon: Icon(Icons.search, color: Color(0xFF7B5E57)),
+                  borderSide: BorderSide(color: colors.mainText)),
+              prefixIcon: Icon(Icons.search, color: colors.secondaryText),
             ),
-            style: const TextStyle(color: Color(0xFF4E342E)),
-            onChanged: (value) {
-              setState(() {
-                _searchQuery = value;
-              });
-            },
+            style: TextStyle(color: colors.mainText),
+            onChanged: (value) => setState(() => _searchQuery = value),
           ),
           const SizedBox(height: 16),
-
-          // ИСПРАВЛЕНО: Используем провайдер для категорий
           categoriesAsync.when(
             data: (categories) {
               final displayCategories = ['Все категории', ...categories];
               return DropdownButton<String?>(
-                hint: const Text(
-                  'Выберите категорию',
-                  style: TextStyle(color: Color(0xFF4E342E)),
-                ),
+                hint: Text('Выберите категорию',
+                    style: TextStyle(color: colors.mainText)),
                 value: _selectedCategory,
                 isExpanded: true,
-                underline: Container(
-                  height: 1,
-                  color: const Color(0xFFD7CCC8),
-                ),
+                underline: Container(height: 1, color: colors.border),
                 items: displayCategories
-                    .map((category) => DropdownMenuItem(
-                  value: category == 'Все категории' ? null : category,
-                  child: Text(
-                    category,
-                    style: const TextStyle(color: Color(0xFF4E342E)),
-                  ),
-                ))
+                    .map((cat) => DropdownMenuItem(
+                          value: cat == 'Все категории' ? null : cat,
+                          child: Text(cat,
+                              style: TextStyle(color: colors.mainText)),
+                        ))
                     .toList(),
-                onChanged: (value) {
-                  setState(() {
-                    _selectedCategory = value;
-                  });
-                  // Обновляем список книг при смене категории
-                  ref.invalidate(getBooksProvider(_selectedCategory));
-                },
+                onChanged: (val) => setState(() => _selectedCategory = val),
               );
             },
-            loading: () => const Center(
-              child: SizedBox(
-                height: 40,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              ),
-            ),
-            error: (error, stack) => Text(
-              'Ошибка загрузки категорий: $error',
-              style: const TextStyle(color: Colors.red),
-            ),
+            loading: () => CircularProgressIndicator(color: colors.accent),
+            error: (err, _) =>
+                Text('Ошибка: $err', style: const TextStyle(color: Colors.red)),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildBooksList(List<BookEntity> books) {
-    final filteredBooks = books.where((book) {
-      final matchesSearch = book.title.toLowerCase().contains(_searchQuery.toLowerCase());
-      final matchesCategory = _selectedCategory == null || book.category == _selectedCategory;
-      return matchesSearch && matchesCategory;
-    }).toList()
+  Widget _buildBooksList(List<BookEntity> books, AppColors colors) {
+    final filtered = books
+        .where((b) =>
+            b.title.toLowerCase().contains(_searchQuery.toLowerCase()) &&
+            (_selectedCategory == null || b.category == _selectedCategory))
+        .toList()
       ..sort((a, b) => b.id.compareTo(a.id));
 
-    if (filteredBooks.isEmpty) {
-      return const Center(
-        child: Text(
-          'Нет книг',
-          style: TextStyle(color: Color(0xFF4E342E)),
-        ),
-      );
+    if (filtered.isEmpty) {
+      return Center(
+          child: Text('Нет книг', style: TextStyle(color: colors.mainText)));
     }
-
     return ListView.builder(
       padding: const EdgeInsets.symmetric(horizontal: 16.0),
-      itemCount: filteredBooks.length,
-      itemBuilder: (context, index) {
-        final book = filteredBooks[index];
-        return _buildBookItem(book);
-      },
+      itemCount: filtered.length,
+      itemBuilder: (context, i) => _buildBookItem(filtered[i], colors),
     );
   }
 
-  Widget _buildBookItem(BookEntity book) {
+  Widget _buildBookItem(BookEntity book, AppColors colors) {
     return Card(
-      color: const Color(0xFFBCAAA4),
+      color: colors.cardBackground,
       elevation: 2,
       margin: const EdgeInsets.symmetric(vertical: 8.0),
       child: ListTile(
-
-        title: Text(
-          book.title,
-          style: const TextStyle(
-            color: Color(0xFF4E342E),
-            fontWeight: FontWeight.bold,
-          ),
-        ),
+        title: Text(book.title,
+            style:
+                TextStyle(color: colors.mainText, fontWeight: FontWeight.bold)),
         subtitle: Text(
-          '${book.author}${book.category != null ? ' • ${book.category}' : ''}',
-          style: const TextStyle(color: Color(0xFF4E342E)),
-        ),
-
-        // В методе _buildBookItem замените leading на:
+            '${book.author}${book.category != null ? ' • ${book.category}' : ''}',
+            style: TextStyle(color: colors.mainText)),
         leading: Container(
           width: 50,
           height: 70,
           decoration: BoxDecoration(
-            color: const Color(0xFF8D6E63),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: const Icon(
-            Icons.menu_book,
-            color: Colors.white,
-            size: 30,
-          ),
+              color: colors.accent, borderRadius: BorderRadius.circular(8)),
+          child: const Icon(Icons.menu_book, color: Colors.white, size: 30),
         ),
-        // Альтернативный вариант - меню с тремя точками
         trailing: PopupMenuButton<String>(
-          icon: const Icon(Icons.more_vert, color: Color(0xFF7B5E57)),
-          onSelected: (value) {
-            if (value == 'edit') {
-              _editBook(book);
-            } else if (value == 'delete') {
-              _showDeleteConfirmation(book);
-            }
-          },
-          itemBuilder: (BuildContext context) => [
-            const PopupMenuItem<String>(
-              value: 'edit',
-              child: Row(
-                children: [
-                  Icon(Icons.edit, color: Color(0xFF7B5E57), size: 20),
-                  SizedBox(width: 8),
-                  Text('Редактировать'),
-                ],
-              ),
-            ),
-            const PopupMenuItem<String>(
-              value: 'delete',
-              child: Row(
-                children: [
-                  Icon(Icons.delete, color: Color(0xFF7B5E57), size: 20),
-                  SizedBox(width: 8),
-                  Text('Удалить'),
-                ],
-              ),
-            ),
+          icon: Icon(Icons.more_vert, color: colors.secondaryText),
+          onSelected: (val) => val == 'edit'
+              ? _editBook(book, colors)
+              : _showDeleteConfirmation(book, colors),
+          itemBuilder: (_) => [
+            const PopupMenuItem(value: 'edit', child: Text('Редактировать')),
+            const PopupMenuItem(
+                value: 'delete',
+                child: Text('Удалить', style: TextStyle(color: Colors.red))),
           ],
         ),
-        onTap: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => ReaderScreen(book: book),
-            ),
-          );
-        },
-        // Долгое нажатие для удаления
-        onLongPress: () => _showDeleteConfirmation(book),
+        onTap: () => Navigator.push(context,
+            MaterialPageRoute(builder: (_) => ReaderScreen(book: book))),
       ),
     );
   }
 
-
-  Widget _buildLoadingState() {
-    return const Center(
+  Widget _buildLoadingState(AppColors colors) => Center(
       child: CircularProgressIndicator(
-        valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF7B5E57)),
-      ),
-    );
-  }
+          valueColor: AlwaysStoppedAnimation(colors.accent)));
 
-  Widget _buildErrorState(Object error) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text(
-            'Ошибка загрузки книг: $error',
-            style: const TextStyle(color: Color(0xFF4E342E)),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 16),
+  Widget _buildErrorState(Object error, AppColors colors) => Center(
+        child: Column(children: [
+          Text('Ошибка: $error', style: TextStyle(color: colors.mainText)),
           ElevatedButton(
-            onPressed: _refreshData,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF8D6E63),
-              foregroundColor: Colors.white,
-            ),
-            child: const Text('Повторить'),
-          ),
-        ],
-      ),
-    );
-  }
+              onPressed: _refreshData,
+              style: ElevatedButton.styleFrom(backgroundColor: colors.accent),
+              child: const Text('Повторить')),
+        ]),
+      );
 
   @override
   void dispose() {
     _searchFocusNode.dispose();
+    _searchController.dispose();
     super.dispose();
   }
 }

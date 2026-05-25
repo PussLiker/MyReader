@@ -1,26 +1,30 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:my_reader/app_colors.dart';
 
 class HighlightPainter extends CustomPainter {
   final List<dynamic> marks;
   final String content;
   final RenderParagraph? renderParagraph;
+  final AppColors colors; // Передаем цвета через конструктор
 
   HighlightPainter({
     required this.marks,
     required this.content,
     required this.renderParagraph,
+    required this.colors, // Обязательный параметр
   });
 
   @override
   void paint(Canvas canvas, Size size) {
-    if (marks.isEmpty || renderParagraph == null || !renderParagraph!.attached) return;
+    if (marks.isEmpty || renderParagraph == null || !renderParagraph!.attached)
+      return;
 
+    // Теперь используем accent или специальный цвет для подсветки из темы
     final paint = Paint()
-      ..color = const Color(0xFFF3E5AB).withOpacity(0.7) // Благородный янтарно-песочный
+      ..color = colors.accent.withOpacity(0.4) // Используем цвет из темы
       ..style = PaintingStyle.fill
       ..strokeCap = StrokeCap.round
-    // Эффект мягких краев акварельного маркера
       ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 2.5);
 
     for (var mark in marks) {
@@ -29,21 +33,18 @@ class HighlightPainter extends CustomPainter {
       if (selectedText == null || selectedText.isEmpty) continue;
       final int end = start + selectedText.length;
 
-      // Получаем текстовые боксы (координаты строк) для выделенного участка текста
       final List<TextBox> boxes = renderParagraph!.getBoxesForSelection(
         TextSelection(baseOffset: start, extentOffset: end),
       );
 
       for (final box in boxes) {
-        // Создаем слегка неровный, «живой» контур мазка кисти вокруг текста
         final Rect rect = Rect.fromLTRB(
           box.left - 2,
-          box.top + 2, // Сдвигаем чуть ниже, чтобы штрих шел как подложка
+          box.top + 2,
           box.right + 2,
           box.bottom - 1,
         );
 
-        // Рисуем скругленный мазок, имитирующий скошенное перо маркера
         final RRect rrect = RRect.fromRectAndCorners(
           rect,
           topLeft: const Radius.circular(4),
@@ -59,6 +60,8 @@ class HighlightPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant HighlightPainter oldDelegate) {
-    return oldDelegate.marks != marks || oldDelegate.renderParagraph != renderParagraph;
+    return oldDelegate.marks != marks ||
+        oldDelegate.renderParagraph != renderParagraph ||
+        oldDelegate.colors != colors; // Добавляем проверку на цвета
   }
 }

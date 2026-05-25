@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'dart:ui';
 
+import '../../app_colors.dart';
+
 class SelectionToolbar extends StatelessWidget {
   final VoidCallback onSaveQuote;
   final VoidCallback onShare;
@@ -15,38 +17,41 @@ class SelectionToolbar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Тулбар больше не использует системные оверлеи, он рендерится как самостоятельный красивый блок
+    // Достаем цвета из темы
+    final colors = Theme.of(context).extension<AppColors>();
+    if (colors == null) {
+      return const SizedBox.shrink();
+    }
+
     return Align(
       alignment: Alignment.bottomCenter,
       child: Padding(
         padding: const EdgeInsets.only(bottom: 24.0),
-        // Отступ чуть выше низа экрана
         child: ClipRRect(
           borderRadius: BorderRadius.circular(20),
           child: BackdropFilter(
             filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-            // Эффект размытия стекла detrás
             child: Container(
-              height: 64, // Жесткая высота, защищающая от RenderFlex overflow
-              width: MediaQuery.of(context).size.width *
-                  0.9, // 90% от ширины экрана
+              height: 64,
+              width: MediaQuery.of(context).size.width * 0.9,
               decoration: BoxDecoration(
+                // Используем цвета темы для градиента
                 gradient: LinearGradient(
                   colors: [
-                    const Color(0xFFEDE7D9).withOpacity(0.85),
-                    const Color(0xFFE0D8C3).withOpacity(0.85),
+                    colors.background.withOpacity(0.9),
+                    colors.cardBackground.withOpacity(0.9),
                   ],
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                 ),
                 borderRadius: BorderRadius.circular(20),
                 border: Border.all(
-                  color: Colors.white.withOpacity(0.4),
+                  color: colors.border.withOpacity(0.5),
                   width: 1.5,
                 ),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.08),
+                    color: Colors.black.withOpacity(0.1),
                     blurRadius: 20,
                     offset: const Offset(0, 8),
                   ),
@@ -59,21 +64,24 @@ class SelectionToolbar extends StatelessWidget {
                     icon: Icons.format_quote_rounded,
                     label: 'Цитата',
                     onPressed: onSaveQuote,
+                    colors: colors, // Передаем colors дальше
                   ),
                   _buildAction(
                     icon: Icons.share_rounded,
                     label: 'Поделиться',
                     onPressed: onShare,
+                    colors: colors,
                   ),
                   Container(
                     width: 1,
                     height: 28,
-                    color: const Color(0xFF7B5E57).withOpacity(0.2),
+                    color: colors.border,
                   ),
                   _buildAction(
                     icon: Icons.close_rounded,
                     label: 'Закрыть',
                     onPressed: onClose,
+                    colors: colors,
                     isClose: true,
                   ),
                 ],
@@ -89,10 +97,11 @@ class SelectionToolbar extends StatelessWidget {
     required IconData icon,
     required String label,
     required VoidCallback onPressed,
+    required AppColors colors, // Добавили параметр
     bool isClose = false,
   }) {
-    final Color color =
-        isClose ? const Color(0xFF8D6E63) : const Color(0xFF5D4037);
+    // Используем акцент из темы для кнопки закрытия, основной текст — для остальных
+    final Color color = colors.mainText;
 
     return InkWell(
       onTap: onPressed,
@@ -111,7 +120,6 @@ class SelectionToolbar extends StatelessWidget {
                 color: color,
                 fontSize: 10,
                 fontWeight: FontWeight.w600,
-                letterSpacing: 0.2,
               ),
             ),
           ],

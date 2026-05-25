@@ -1,24 +1,23 @@
 import 'package:flutter/material.dart';
+import '../../app_colors.dart';
 import '../../presentation/widgets/quote_block_widget.dart';
 
 class TextTransformer {
   static List<Widget> buildTextBlocks(
-      String text,
-      List<dynamic> marks,
-      dynamic settings,
-      Function(dynamic) onQuoteTap, // Передаем callback для обработки клика
-      ) {
+    String text,
+    List<dynamic> marks,
+    dynamic settings,
+    Function(dynamic) onQuoteTap,
+    AppColors colors,
+  ) {
     final TextStyle baseStyle = TextStyle(
       fontFamily: settings.fontFamily ?? 'Serif',
       fontSize: settings.fontSize ?? 18.0,
       height: settings.lineHeight ?? 1.4,
-      color: const Color(0xFF3E2723),
+      color: colors.mainText,
     );
 
-    if (marks.isEmpty) {
-      return [Text(text, style: baseStyle)];
-    }
-
+    // Сортируем маркеры
     final sortedMarks = List.from(marks)
       ..sort((a, b) => a.charOffset.compareTo(b.charOffset));
 
@@ -29,36 +28,37 @@ class TextTransformer {
       final int markStart = mark.charOffset;
       final String? selectedText = mark.selectedText;
 
-      if (selectedText == null || selectedText.isEmpty) continue;
-      final int markEnd = markStart + selectedText.length;
+      // Временная проверка: если маркер за пределами текста, принудительно двигаем индекс
+      if (markStart >= text.length) continue;
 
-      if (markStart < currentIndex || markEnd > text.length) continue;
-
+      // Добавляем обычный текст до маркера
       if (markStart > currentIndex) {
         final String normalText = text.substring(currentIndex, markStart);
-        if (normalText.trim().isNotEmpty) {
+        if (normalText.isNotEmpty) {
           blocks.add(Text(normalText, style: baseStyle));
         }
       }
 
+      // Вычисляем длину, чтобы не выйти за границы
+      final int len = selectedText?.length ?? 0;
+      final int markEnd =
+          (markStart + len > text.length) ? text.length : markStart + len;
       final String quoteText = text.substring(markStart, markEnd);
 
-      // Добавляем коробочку с передачей параметров комментария и клика
+      // Добавляем саму цитату
       blocks.add(QuoteBlockWidget(
         text: quoteText,
         baseStyle: baseStyle,
-        currentComment: mark.comment, // Передаем текст текущей заметки
-        onTap: () => onQuoteTap(mark), // Передаем сам объект разметки при тапе
+        currentComment: mark.comment,
+        onTap: () => onQuoteTap(mark),
       ));
 
       currentIndex = markEnd;
     }
 
+    // Добавляем оставшийся текст
     if (currentIndex < text.length) {
-      final String trailingText = text.substring(currentIndex);
-      if (trailingText.trim().isNotEmpty) {
-        blocks.add(Text(trailingText, style: baseStyle));
-      }
+      blocks.add(Text(text.substring(currentIndex), style: baseStyle));
     }
 
     return blocks;

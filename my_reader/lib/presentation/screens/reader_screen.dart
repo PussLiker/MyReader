@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/rendering.dart';
 
+import '../../app_colors.dart';
 import '../../domain/entities/Selection.dart';
 import '../../domain/entities/reader_settings.dart';
 import '../../domain/use_cases/settings_service.dart';
@@ -313,21 +314,22 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   }
 
   void _showChaptersDialog() {
+    final colors = Theme.of(context).extension<AppColors>()!;
     showDialog(
       context: context,
       builder: (context) => Dialog(
-        backgroundColor: const Color(0xFFEDE7D9),
+        backgroundColor: colors.background,
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxHeight: 500),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Padding(
-                padding: EdgeInsets.all(16.0),
+              Padding(
+                padding: const EdgeInsets.all(16.0),
                 child: Text(
                   'Оглавление',
                   style: TextStyle(
-                    color: Color(0xFF4E342E),
+                    color: colors.mainText,
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
                   ),
@@ -335,10 +337,10 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
               ),
               Expanded(
                 child: _chapters.isEmpty
-                    ? const Center(
+                    ? Center(
                         child: Text(
                           'Нет глав',
-                          style: TextStyle(color: Color(0xFF4E342E)),
+                          style: TextStyle(color: colors.mainText),
                         ),
                       )
                     : ListView.builder(
@@ -351,15 +353,15 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                               height: 30,
                               decoration: BoxDecoration(
                                 color: index == _currentChapterIndex.floor()
-                                    ? const Color(0xFF8D6E63)
-                                    : const Color(0xFFBCAAA4),
+                                    ? colors.accent
+                                    : colors.border,
                                 shape: BoxShape.circle,
                               ),
                               child: Center(
                                 child: Text(
                                   '${index + 1}',
-                                  style: const TextStyle(
-                                    color: Color(0xFF4E342E),
+                                  style: TextStyle(
+                                    color: colors.mainText,
                                     fontWeight: FontWeight.bold,
                                     fontSize: 12,
                                   ),
@@ -369,7 +371,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                             title: Text(
                               chapter.title,
                               style: TextStyle(
-                                color: const Color(0xFF4E342E),
+                                color: colors.mainText,
                                 fontWeight:
                                     index == _currentChapterIndex.floor()
                                         ? FontWeight.bold
@@ -390,9 +392,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                 padding: const EdgeInsets.all(16.0),
                 child: TextButton(
                   onPressed: () => Navigator.pop(context),
-                  child: const Text(
+                  child: Text(
                     'Закрыть',
-                    style: TextStyle(color: Color(0xFF4E342E)),
+                    style: TextStyle(color: colors.mainText),
                   ),
                 ),
               ),
@@ -403,69 +405,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     );
   }
 
-  void _addBookmarkAtSelection() async {
-    final repo = ref.read(bookRepositoryProvider);
-
-    // Проверяем существование ЛЮБОЙ метки (закладка или цитата)
-    final exists = await repo.anyMarkExists(widget.book.id, _selection.start);
-
-    if (exists) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('На этом месте уже есть закладка или цитата'),
-            backgroundColor: Color(0xFF8D6E63),
-            // Тот же цвет, что у основной темы
-            duration: Duration(seconds: 2),
-          ),
-        );
-      }
-      return;
-    }
-
-    // Рассчитываем процент скролла
-    final maxScroll = _scrollController.position.maxScrollExtent;
-    final currentOffset = _scrollController.offset;
-    final scrollPercent = maxScroll > 0 ? (currentOffset / maxScroll) : 0.0;
-
-    final selectedText = _chapters[_currentChapterIndex.toInt()]
-        .content
-        .substring(
-          _selection.start,
-          _selection.end,
-        )
-        .trim();
-
-    final position = ReadingPosition(
-      chapterIndex: _currentChapterIndex,
-      position: scrollPercent,
-      charOffset: _selection.start,
-      selectedText: selectedText,
-    );
-
-    // Внутри onPressed у кнопки "Сохранить" в диалоге:
-    await DatabaseHelper.instance.addBookmarkWithPosition(
-      widget.book.id, // 1. ID книги
-      position, // 2. Объект позиции
-      "Моя закладка", // Название
-      "", // Описание (пустая строка)
-      0xFF7B5E57, // 5. Цвет
-    );
-
-    await _loadBookmarksAndQuotes();
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Закладка добавлена'),
-          backgroundColor: Color(0xFF8D6E63),
-          duration: Duration(seconds: 1),
-        ),
-      );
-    }
-  }
-
   Future<void> _saveQuoteAtSelection() async {
+    final colors = Theme.of(context).extension<AppColors>()!;
     if (!_selection.isValid || _selection.start == _selection.end) return;
 
     final chapter = _currentChapter;
@@ -479,8 +420,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     final exists = await repo.anyMarkExists(widget.book.id, _selection.start);
 
     if (exists) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Уже есть метка'), backgroundColor: Color(0xFF8D6E63)));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Уже есть метка'),
+          backgroundColor: colors.secondaryText));
       return;
     }
 
@@ -502,9 +444,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
         _showSelectionToolbar = false;
       });
 
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text('Цитата сохранена'),
-          backgroundColor: Color(0xFF8D6E63),
+          backgroundColor: colors.secondaryText,
           duration: Duration(seconds: 1)));
     }
   }
@@ -512,55 +454,55 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   Future<bool?> _showQuoteDialog(
       ReadingPosition position, String selectedText) {
     final noteController = TextEditingController();
+    // Достаем цвета здесь, так как мы внутри метода State
+    final colors = Theme.of(context).extension<AppColors>()!;
 
-    // Возвращаем результат showDialog (true если сохранили, null если отменили)
     return showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFFEDE7D9),
-        title: const Text(
+        backgroundColor: colors.background,
+        // Используем фоновый цвет из темы
+        title: Text(
           'Сохранить цитату',
-          style:
-              TextStyle(color: Color(0xFF4E342E), fontWeight: FontWeight.bold),
+          style: TextStyle(color: colors.mainText, fontWeight: FontWeight.bold),
         ),
         content: SizedBox(
           width: double.maxFinite,
           child: SingleChildScrollView(
-            // Заменил ListView на SingleChildScrollView для лучшей работы с клавиатурой
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
+                Text(
                   'Выделенный текст:',
-                  style: TextStyle(color: Color(0xFF4E342E), fontSize: 12),
+                  style: TextStyle(color: colors.secondaryText, fontSize: 12),
                 ),
                 const SizedBox(height: 8),
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFD7CCC8),
+                    color: colors.border.withOpacity(0.3),
+                    // Легкий оттенок границы
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Text(
                     selectedText,
-                    style: const TextStyle(
-                        color: Color(0xFF4E342E), fontStyle: FontStyle.italic),
+                    style: TextStyle(
+                        color: colors.mainText, fontStyle: FontStyle.italic),
                   ),
                 ),
                 const SizedBox(height: 16),
                 TextField(
                   controller: noteController,
                   autofocus: true,
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     labelText: 'Ваш комментарий',
-                    labelStyle: TextStyle(color: Color(0xFF7B5E57)),
+                    labelStyle: TextStyle(color: colors.secondaryText),
                     focusedBorder: UnderlineInputBorder(
-                      borderSide:
-                          BorderSide(color: Color(0xFF4E342E), width: 2),
+                      borderSide: BorderSide(color: colors.accent, width: 2),
                     ),
                   ),
-                  style: const TextStyle(color: Color(0xFF4E342E)),
+                  style: TextStyle(color: colors.mainText),
                 ),
               ],
             ),
@@ -569,14 +511,11 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            // Возвращаем false
-            child: const Text('Отмена',
-                style: TextStyle(color: Color(0xFF7B5E57))),
+            child: Text('Отмена', style: TextStyle(color: colors.accent)),
           ),
           TextButton(
             onPressed: () async {
               try {
-                // Сохраняем в БД
                 await DatabaseHelper.instance.addQuoteWithPosition(
                   widget.book.id,
                   position,
@@ -587,17 +526,16 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                 );
 
                 if (!context.mounted) return;
-                Navigator.pop(
-                    context, true); // Возвращаем true - сигнал к обновлению UI
+                Navigator.pop(context, true);
               } catch (e) {
-                print("Ошибка сохранения цитаты: $e");
+                debugPrint("Ошибка сохранения цитаты: $e");
                 Navigator.pop(context, false);
               }
             },
-            child: const Text(
+            child: Text(
               'Сохранить',
               style: TextStyle(
-                  color: Color(0xFF4E342E), fontWeight: FontWeight.bold),
+                  color: colors.secondaryText, fontWeight: FontWeight.bold),
             ),
           ),
         ],
@@ -636,30 +574,33 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   }
 
   void _showBookmarksDialog() {
+    final colors = Theme.of(context).extension<AppColors>()!;
+
     if (_bookmarks.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Нет закладок'),
-          backgroundColor: Colors.orange,
+        SnackBar(
+          content: const Text('Нет закладок'),
+          backgroundColor: colors.accent, // Используем акцент вместо оранжевого
         ),
       );
       return;
     }
+
     showDialog(
       context: context,
       builder: (context) => Dialog(
-        backgroundColor: const Color(0xFFEDE7D9),
+        backgroundColor: colors.background, // Используем фон темы
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxHeight: 400),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Padding(
-                padding: EdgeInsets.all(16.0),
+              Padding(
+                padding: const EdgeInsets.all(16.0),
                 child: Text(
                   'Закладки',
                   style: TextStyle(
-                    color: Color(0xFF4E342E),
+                    color: colors.mainText, // Основной цвет текста
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
                   ),
@@ -677,55 +618,24 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
 
                     return ListTile(
                       leading: Icon(Icons.bookmark,
-                          color: Color(bookmark.color ?? 0xFFEF9A9A)),
+                          color: bookmark.color != null
+                              ? Color(bookmark.color!)
+                              : colors.accent),
                       title: Text(
                         bookmark.title ?? 'Закладка',
-                        style: const TextStyle(color: Color(0xFF4E342E)),
+                        style: TextStyle(color: colors.mainText),
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                       ),
                       subtitle: Text(
                         '${bookmark.note ?? ''} • $chapterTitle',
-                        style: const TextStyle(color: Color(0xFF8D6E63)),
+                        style: TextStyle(color: colors.secondaryText),
+                        // Вторичный текст
                         maxLines: 2,
                       ),
-                      trailing: PopupMenuButton<String>(
-                        icon: const Icon(Icons.more_vert,
-                            color: Color(0xFF7B5E57), size: 18),
-                        onSelected: (value) {
-                          if (value == 'delete') {
-                            _deleteBookmark(bookmark);
-                          } else if (value == 'share' &&
-                              bookmark.selectedText != null) {
-                            Share.share(
-                                '"${bookmark.selectedText!}" - ${widget.book.author}. ${widget.book.title}.');
-                          }
-                        },
-                        itemBuilder: (context) => [
-                          if (bookmark.selectedText != null)
-                            const PopupMenuItem(
-                              value: 'share',
-                              child: Row(
-                                children: [
-                                  Icon(Icons.share,
-                                      size: 16, color: Color(0xFF7B5E57)),
-                                  SizedBox(width: 8),
-                                  Text('Поделиться'),
-                                ],
-                              ),
-                            ),
-                          const PopupMenuItem(
-                            value: 'delete',
-                            child: Row(
-                              children: [
-                                Icon(Icons.delete,
-                                    size: 16, color: Color(0xFF7B5E57)),
-                                SizedBox(width: 8),
-                                Text('Удалить'),
-                              ],
-                            ),
-                          ),
-                        ],
+                      trailing: IconButton(
+                        icon: Icon(Icons.delete, color: colors.mainText),
+                        onPressed: () => _deleteBookmark(bookmark),
                       ),
                       onTap: () {
                         Navigator.pop(context);
@@ -739,10 +649,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                 padding: const EdgeInsets.all(16.0),
                 child: TextButton(
                   onPressed: () => Navigator.pop(context),
-                  child: const Text(
-                    'Закрыть',
-                    style: TextStyle(color: Color(0xFF4E342E)),
-                  ),
+                  child:
+                      Text('Закрыть', style: TextStyle(color: colors.mainText)),
                 ),
               ),
             ],
@@ -752,13 +660,14 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     );
   }
 
+// Внутри State класса, где доступны AppColors:
+
   void _showQuotesDialog() {
+    final colors = Theme.of(context).extension<AppColors>()!;
     if (_quotes.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Нет цитат'),
-          backgroundColor: Colors.orange,
-        ),
+        SnackBar(
+            content: const Text('Нет цитат'), backgroundColor: colors.accent),
       );
       return;
     }
@@ -766,22 +675,19 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     showDialog(
       context: context,
       builder: (context) => Dialog(
-        backgroundColor: const Color(0xFFEDE7D9),
+        backgroundColor: colors.background,
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxHeight: 400),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Padding(
-                padding: EdgeInsets.all(16.0),
-                child: Text(
-                  'Цитаты',
-                  style: TextStyle(
-                    color: Color(0xFF4E342E),
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
+              Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Text('Цитаты',
+                    style: TextStyle(
+                        color: colors.mainText,
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold)),
               ),
               Expanded(
                 child: ListView.builder(
@@ -793,26 +699,22 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                         : 'Глава ${quote.chapterIndex.floor() + 1}';
 
                     return ListTile(
-                      leading: const Icon(Icons.format_quote,
-                          color: Color(0xFF7B5E57)),
-                      title: Text(
-                        quote.selectedText ?? 'Цитата',
-                        style: const TextStyle(color: Color(0xFF4E342E)),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      subtitle: Text(
-                        '${quote.comment ?? ''} • $chapterTitle',
-                        style: const TextStyle(color: Color(0xFF8D6E63)),
-                        maxLines: 2,
-                      ),
+                      leading:
+                          Icon(Icons.format_quote, color: colors.secondaryText),
+                      title: Text(quote.selectedText ?? 'Цитата',
+                          style: TextStyle(color: colors.mainText),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis),
+                      subtitle: Text('${quote.comment ?? ''} • $chapterTitle',
+                          style: TextStyle(color: colors.secondaryText),
+                          maxLines: 2),
                       trailing: PopupMenuButton<String>(
-                        icon: const Icon(Icons.more_vert,
-                            color: Color(0xFF7B5E57), size: 18),
+                        icon: Icon(Icons.more_vert,
+                            color: colors.secondaryText, size: 18),
                         onSelected: (value) {
-                          if (value == 'delete') {
+                          if (value == 'delete')
                             _deleteQuote(quote);
-                          } else if (value == 'share' &&
+                          else if (value == 'share' &&
                               quote.selectedText != null) {
                             Share.share(
                                 '"${quote.selectedText!}" - ${widget.book.author}. ${widget.book.title}.');
@@ -820,28 +722,22 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                         },
                         itemBuilder: (context) => [
                           if (quote.selectedText != null)
-                            const PopupMenuItem(
-                              value: 'share',
-                              child: Row(
-                                children: [
+                            PopupMenuItem(
+                                value: 'share',
+                                child: Row(children: [
                                   Icon(Icons.share,
-                                      size: 16, color: Color(0xFF7B5E57)),
-                                  SizedBox(width: 8),
-                                  Text('Поделиться'),
-                                ],
-                              ),
-                            ),
-                          const PopupMenuItem(
-                            value: 'delete',
-                            child: Row(
-                              children: [
+                                      size: 16, color: colors.secondaryText),
+                                  const SizedBox(width: 8),
+                                  const Text('Поделиться')
+                                ])),
+                          PopupMenuItem(
+                              value: 'delete',
+                              child: Row(children: [
                                 Icon(Icons.delete,
-                                    size: 16, color: Color(0xFF7B5E57)),
-                                SizedBox(width: 8),
-                                Text('Удалить'),
-                              ],
-                            ),
-                          ),
+                                    size: 16, color: colors.secondaryText),
+                                const SizedBox(width: 8),
+                                const Text('Удалить')
+                              ])),
                         ],
                       ),
                       onTap: () {
@@ -855,12 +751,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
               Padding(
                 padding: const EdgeInsets.all(16.0),
                 child: TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text(
-                    'Закрыть',
-                    style: TextStyle(color: Color(0xFF4E342E)),
-                  ),
-                ),
+                    onPressed: () => Navigator.pop(context),
+                    child: Text('Закрыть',
+                        style: TextStyle(color: colors.mainText))),
               ),
             ],
           ),
@@ -870,33 +763,25 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   }
 
   Future<void> _deleteBookmark(ReadingPosition bookmark) async {
+    final colors = Theme.of(context).extension<AppColors>()!;
     final result = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFFEDE7D9),
-        title: const Text(
-          'Удалить закладку?',
-          style: TextStyle(color: Color(0xFF4E342E)),
-        ),
+        backgroundColor: colors.background,
+        title:
+            Text('Удалить закладку?', style: TextStyle(color: colors.mainText)),
         content: Text(
-          'Вы уверены, что хотите удалить закладку "${bookmark.selectedText ?? 'без текста'}"?',
-          style: const TextStyle(color: Color(0xFF4E342E)),
-        ),
+            'Удалить закладку "${bookmark.selectedText ?? 'без текста'}"?',
+            style: TextStyle(color: colors.mainText)),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text(
-              'Отмена',
-              style: TextStyle(color: Color(0xFF4E342E)),
-            ),
-          ),
+              onPressed: () => Navigator.pop(context, false),
+              child: Text('Отмена',
+                  style: TextStyle(color: colors.secondaryText))),
           TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text(
-              'Удалить',
-              style: TextStyle(color: Color(0xFF4E342E)),
-            ),
-          ),
+              onPressed: () => Navigator.pop(context, true),
+              child:
+                  const Text('Удалить', style: TextStyle(color: Colors.red))),
         ],
       ),
     );
@@ -905,58 +790,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
       try {
         await DatabaseHelper.instance.deleteBookmarkById(bookmark.id!);
         await _loadBookmarksAndQuotes();
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Закладка удалена'),
-            backgroundColor: Color(0xFF8D6E63),
-          ),
-        );
-      } catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Ошибка удаления: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    }
-  }
-
-  Future<void> _deleteQuote(ReadingPosition quote) async {
-    final result = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFFEDE7D9),
-        title: const Text('Удалить цитату?',
-            style: TextStyle(color: Color(0xFF4E342E))),
-        content: Text(
-            'Вы уверены, что хотите удалить цитату "${quote.selectedText ?? 'без текста'}"?',
-            style: const TextStyle(color: Color(0xFF4E342E))),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Отмена',
-                  style: TextStyle(color: Color(0xFF4E342E)))),
-          TextButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Удалить',
-                  style: TextStyle(color: Color(0xFF4E342E)))),
-        ],
-      ),
-    );
-
-    if (result == true && quote.id != null) {
-      try {
-        await DatabaseHelper.instance.deleteQuoteById(quote.id!);
-
-        // Используем БЕСШОВНОЕ обновление
-        await _refreshUI();
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text('Цитата удалена'),
-              backgroundColor: Color(0xFF8D6E63)),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: const Text('Закладка удалена'),
+            backgroundColor: colors.accent));
       } catch (e) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
             content: Text('Ошибка удаления: $e'), backgroundColor: Colors.red));
@@ -964,46 +800,67 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     }
   }
 
-  Widget _buildLoading() {
-    return const Center(
-      child: CircularProgressIndicator(
-        valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF7B5E57)),
+  Future<void> _deleteQuote(ReadingPosition quote) async {
+    final colors = Theme.of(context).extension<AppColors>()!;
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: colors.background,
+        title:
+            Text('Удалить цитату?', style: TextStyle(color: colors.mainText)),
+        content: Text('Удалить цитату "${quote.selectedText ?? 'без текста'}"?',
+            style: TextStyle(color: colors.mainText)),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: Text('Отмена',
+                  style: TextStyle(color: colors.secondaryText))),
+          TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child:
+                  const Text('Удалить', style: TextStyle(color: Colors.red))),
+        ],
       ),
     );
+
+    if (result == true && quote.id != null) {
+      try {
+        await DatabaseHelper.instance.deleteQuoteById(quote.id!);
+        await _refreshUI();
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: const Text('Цитата удалена'),
+            backgroundColor: colors.accent));
+      } catch (e) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Ошибка удаления: $e'), backgroundColor: Colors.red));
+      }
+    }
   }
 
+  Widget _buildLoading() => Center(
+      child: CircularProgressIndicator(
+          valueColor: AlwaysStoppedAnimation(
+              Theme.of(context).extension<AppColors>()!.accent)));
+
   Widget _buildError() {
+    final colors = Theme.of(context).extension<AppColors>()!;
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(
-              Icons.error_outline,
-              size: 64,
-              color: Color(0xFF8D6E63),
-            ),
+            Icon(Icons.error_outline, size: 64, color: colors.secondaryText),
             const SizedBox(height: 16),
-            Text(
-              _errorMessage,
-              style: const TextStyle(
-                color: Color(0xFF4E342E),
-                fontSize: 16,
-              ),
-              textAlign: TextAlign.center,
-            ),
+            Text(_errorMessage,
+                style: TextStyle(color: colors.mainText, fontSize: 16),
+                textAlign: TextAlign.center),
             const SizedBox(height: 16),
             ElevatedButton(
-              onPressed: _loadBook,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF8D6E63),
-              ),
-              child: const Text(
-                'Попробовать снова',
-                style: TextStyle(color: Colors.white),
-              ),
-            ),
+                onPressed: _loadBook,
+                style: ElevatedButton.styleFrom(backgroundColor: colors.accent),
+                child: const Text('Повторить',
+                    style: TextStyle(color: Colors.white))),
           ],
         ),
       ),
@@ -1011,20 +868,21 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   }
 
   Widget _buildNoContent() {
-    return const Center(
+    final colors = Theme.of(context).extension<AppColors>()!;
+    return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Icon(
             Icons.book_outlined,
             size: 64,
-            color: Color(0xFF8D6E63),
+            color: colors.mainText,
           ),
           SizedBox(height: 16),
           Text(
             'Книга не содержит контента',
             style: TextStyle(
-              color: Color(0xFF4E342E),
+              color: colors.secondaryText,
               fontSize: 16,
             ),
           ),
@@ -1033,167 +891,39 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     );
   }
 
-  Widget _buildEpubContent(ChapterEntity chapter) {
-    final TextStyle titleStyle = TextStyle(
-      fontFamily: _readerSettings.fontFamily ?? 'Serif',
-      fontSize: (_readerSettings.fontSize ?? 18.0) + 6,
-      height: 1.3,
-      fontWeight: FontWeight.bold,
-      color: const Color(0xFF3E2723),
-    );
-
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        return SizedBox(
-          width: constraints.maxWidth,
-          height: constraints.maxHeight,
-          child: Material(
-            color: const Color(0xFFF5F2EB),
-            child: Stack(
-              children: [
-                Theme(
-                  data: ThemeData(
-                    textSelectionTheme: const TextSelectionThemeData(
-                      selectionColor: Color(0x26D4A373),
-                      selectionHandleColor: Color(0xFFD4A373),
-                    ),
-                  ),
-                  child: SelectionArea(
-                    onSelectionChanged: (SelectedContent? content) {
-                      if (content == null || content.plainText.isEmpty) {
-                        setState(() {
-                          _isTextSelected = false;
-                          _showSelectionToolbar = false;
-                        });
-                        return;
-                      }
-
-                      final String selectedText = content.plainText;
-                      final int startOffset =
-                          chapter.content.indexOf(selectedText);
-
-                      if (startOffset != -1) {
-                        _selection = TextSelection(
-                          baseOffset: startOffset,
-                          extentOffset: startOffset + selectedText.length,
-                        );
-                        setState(() {
-                          _isTextSelected = true;
-                          _showSelectionToolbar = true;
-                        });
-                      }
-                    },
-                    contextMenuBuilder: (context, state) =>
-                        const SizedBox.shrink(),
-                    child: SingleChildScrollView(
-                      controller: _scrollController,
-                      padding: const EdgeInsets.fromLTRB(24, 20, 24, 160),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Center(
-                            child: Text(
-                              chapter.title,
-                              style: titleStyle,
-                              textAlign: TextAlign.center,
-                            ),
-                          ),
-                          const SizedBox(height: 24),
-                          // Разворачиваем сгенерированные блоки контента главы
-                          ...TextTransformer.buildTextBlocks(
-                            chapter.content,
-                            _indexedMarks[_currentChapterIndex.floor()] ?? [],
-                            _readerSettings,
-                            (mark) => _showCommentBottomSheet(mark),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-                AnimatedPositioned(
-                  duration: const Duration(milliseconds: 250),
-                  curve: Curves.fastOutSlowIn,
-                  bottom: _showSelectionToolbar && _isTextSelected ? 0 : -100,
-                  left: 0,
-                  right: 0,
-                  child: SelectionToolbar(
-                    onSaveQuote: () {
-                      _saveQuoteAtSelection();
-                      setState(() {
-                        _showSelectionToolbar = false;
-                        _isTextSelected = false;
-                      });
-                    },
-                    onShare: () {
-                      if (_selection.start != -1 && _selection.end != -1) {
-                        final textToShare = chapter.content
-                            .substring(
-                              _selection.start,
-                              _selection.end,
-                            )
-                            .trim();
-                        _shareQuote(textToShare);
-                      }
-                    },
-                    onClose: () => setState(() {
-                      _showSelectionToolbar = false;
-                      _isTextSelected = false;
-                    }),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
   void _showCommentBottomSheet(dynamic mark) {
     final TextEditingController commentController =
         TextEditingController(text: mark.comment);
+    final colors = Theme.of(context).extension<AppColors>()!; // Доступ к теме
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      // Позволяет шторке подниматься выше половины экрана
       backgroundColor: Colors.transparent,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
       builder: (BuildContext context) {
-        // Используем Padding с viewInsets, чтобы контент сдвигался вверх на высоту клавиатуры
         return Padding(
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.of(context).viewInsets.bottom,
-          ),
+          padding:
+              EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
           child: Container(
-            // Ограничиваем максимальную высоту в 75% экрана, чтобы шторка не прыгала на весь экран
             constraints: BoxConstraints(
-              maxHeight: MediaQuery.of(context).size.height * 0.75,
-            ),
-            decoration: const BoxDecoration(
-              color: Color(0xFFFDFBF7),
-              borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+                maxHeight: MediaQuery.of(context).size.height * 0.75),
+            decoration: BoxDecoration(
+              color: colors.background, // Динамический фон
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(20)),
             ),
             child: SafeArea(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
-                // Шторка сожмется под размер контента, если текста мало
                 children: [
                   const SizedBox(height: 12),
                   Container(
-                    width: 40,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFE0DCD3),
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                          color: colors.border,
+                          borderRadius: BorderRadius.circular(2))),
                   const SizedBox(height: 8),
-
-                  // Скроллируемая часть
                   Flexible(
                     child: SingleChildScrollView(
                       padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -1203,74 +933,53 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              Text(
-                                'Заметка к цитате',
-                                style: TextStyle(
-                                  fontFamily:
-                                      _readerSettings.fontFamily ?? 'Serif',
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.bold,
-                                  color: const Color(0xFF3E2723),
-                                ),
-                              ),
+                              Text('Заметка',
+                                  style: TextStyle(
+                                      fontFamily:
+                                          _readerSettings.fontFamily ?? 'Serif',
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.bold,
+                                      color: colors.mainText)),
                               IconButton(
-                                icon: const Icon(Icons.share_outlined,
-                                    color: Color(0xFF8B7E74)),
-                                tooltip: 'Поделиться цитатой',
-                                onPressed: () {
-                                  if (mark.selectedText != null &&
-                                      mark.selectedText!.isNotEmpty) {
-                                    _shareQuote(mark.selectedText!.trim());
-                                  }
-                                },
-                              ),
+                                  icon: Icon(Icons.share_outlined,
+                                      color: colors.secondaryText),
+                                  onPressed: () =>
+                                      _shareQuote(mark.selectedText!.trim())),
                             ],
                           ),
                           const SizedBox(height: 8),
                           Container(
                             padding: const EdgeInsets.all(12),
                             decoration: BoxDecoration(
-                              color: const Color(0xFFF5F2EB),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            width: double.infinity,
-                            child: Text(
-                              '"${mark.selectedText}"',
-                              style: TextStyle(
-                                fontFamily:
-                                    _readerSettings.fontFamily ?? 'Serif',
-                                fontSize: 14,
-                                fontStyle: FontStyle.italic,
-                                color: const Color(0xFF6D4C41),
-                                height: 1.4,
-                              ),
-                            ),
+                                color: colors.cardBackground,
+                                borderRadius: BorderRadius.circular(8)),
+                            child: Text('"${mark.selectedText}"',
+                                style: TextStyle(
+                                    fontSize: 14,
+                                    fontStyle: FontStyle.italic,
+                                    color: colors.secondaryText,
+                                    height: 1.4)),
                           ),
                           const SizedBox(height: 16),
                           TextField(
                             controller: commentController,
                             maxLines: null,
-                            minLines: 3,
-                            autofocus: false,
-                            cursorColor: const Color(0xFFD4A373),
-                            style: const TextStyle(
-                                color: Color(0xFF2B1D11), fontSize: 16),
+                            cursorColor: colors.accent,
+                            style:
+                                TextStyle(color: colors.mainText, fontSize: 16),
                             decoration: InputDecoration(
-                              hintText: 'Напишите свои мысли или заметку...',
-                              hintStyle:
-                                  const TextStyle(color: Color(0xFFA69F96)),
+                              hintText: 'Напишите заметку...',
+                              hintStyle: TextStyle(color: colors.secondaryText),
                               filled: true,
-                              fillColor: const Color(0xFFFBF9F5),
+                              fillColor: colors.cardBackground,
                               focusedBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(10),
-                                borderSide: const BorderSide(
-                                    color: Color(0xFFD4A373), width: 1.5),
-                              ),
+                                  borderRadius: BorderRadius.circular(10),
+                                  borderSide: BorderSide(
+                                      color: colors.accent, width: 1.5)),
                               enabledBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(10),
-                                borderSide: const BorderSide(
-                                    color: Color(0xFFEFEBE4), width: 1),
-                              ),
+                                  borderRadius: BorderRadius.circular(10),
+                                  borderSide: BorderSide(
+                                      color: colors.border, width: 1)),
                             ),
                           ),
                           const SizedBox(height: 20),
@@ -1278,56 +987,33 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                       ),
                     ),
                   ),
-
-                  // Панель кнопок (фиксированно снизу шторки, но над клавиатурой)
                   Padding(
                     padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
                     child: Row(
                       children: [
                         TextButton.icon(
-                          onPressed: () {
-                            Navigator.pop(context);
-                            _deleteQuote(mark);
-                          },
-                          icon: const Icon(Icons.delete_outline,
-                              color: Colors.redAccent, size: 20),
-                          label: const Text('Удалить',
-                              style: TextStyle(color: Colors.redAccent)),
-                        ),
+                            onPressed: () {
+                              Navigator.pop(context);
+                              _deleteQuote(mark);
+                            },
+                            icon: const Icon(Icons.delete_outline,
+                                color: Colors.redAccent),
+                            label: const Text('Удалить',
+                                style: TextStyle(color: Colors.redAccent))),
                         const Spacer(),
-                        TextButton(
-                          onPressed: () => Navigator.pop(context),
-                          child: const Text('Отмена',
-                              style: TextStyle(color: Color(0xFF8B7E74))),
-                        ),
-                        const SizedBox(width: 8),
                         ElevatedButton(
-                          // Внутри _showCommentBottomSheet, в кнопке "Сохранить":
                           onPressed: () async {
-                            final String newComment =
-                                commentController.text.trim();
                             Navigator.pop(context);
-
-                            // Прямо передаем null, если строка пустая
-                            final String? valueToUpdate =
-                                newComment.isEmpty ? null : newComment;
-
-                            // 1. Обновляем БД (метод выше сам обработает null)
-                            await DatabaseHelper.instance
-                                .updateQuoteComment(mark.id!, valueToUpdate);
-
-                            // 2. Обновляем UI
+                            await DatabaseHelper.instance.updateQuoteComment(
+                                mark.id!,
+                                commentController.text.trim().isEmpty
+                                    ? null
+                                    : commentController.text.trim());
                             await _refreshUI();
                           },
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFFD4A373),
-                            foregroundColor: Colors.white,
-                            elevation: 0,
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8)),
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 20, vertical: 12),
-                          ),
+                              backgroundColor: colors.accent,
+                              foregroundColor: Colors.white),
                           child: const Text('Сохранить',
                               style: TextStyle(fontWeight: FontWeight.bold)),
                         ),
@@ -1343,106 +1029,203 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     );
   }
 
-  Widget _buildTextContent(ChapterEntity chapter) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        return SizedBox(
-          width: constraints.maxWidth,
-          height: constraints.maxHeight,
-          child: Material(
-            color: const Color(0xFFF5F2EB), // Цвет страницы книги
-            child: Stack(
-              children: [
-                Theme(
-                  data: ThemeData(
-                    textSelectionTheme: const TextSelectionThemeData(
-                      selectionColor: Color(0x26D4A373),
-                      // Элегантное янтарное выделение при зажатии
-                      selectionHandleColor: Color(0xFFD4A373),
-                    ),
+  Widget _buildEpubContent(ChapterEntity chapter) {
+    final colors = Theme.of(context).extension<AppColors>() ?? AppColors.light;
+
+    final TextStyle titleStyle = TextStyle(
+      fontFamily: _readerSettings.fontFamily ?? 'Serif',
+      fontSize: (_readerSettings.fontSize ?? 18.0) + 6,
+      height: 1.3,
+      fontWeight: FontWeight.bold,
+      color: colors.mainText, // Динамический цвет
+    );
+
+    return LayoutBuilder(builder: (context, constraints) {
+      return SizedBox(
+        width: constraints.maxWidth,
+        height: constraints.maxHeight,
+        child: Material(
+          color: colors.cardBackground, // Динамический цвет
+          child: Stack(
+            children: [
+              Theme(
+                data: Theme.of(context).copyWith(
+                  textSelectionTheme: TextSelectionThemeData(
+                    selectionColor: colors.accent.withOpacity(0.3),
+                    selectionHandleColor: colors.accent,
                   ),
-                  child: SelectionArea(
-                    onSelectionChanged: (SelectedContent? content) {
-                      if (content == null || content.plainText.isEmpty) {
-                        setState(() {
-                          _isTextSelected = false;
-                          _showSelectionToolbar = false;
-                        });
-                        return;
-                      }
-
-                      final String selectedText = content.plainText;
-                      final int startOffset =
-                          chapter.content.indexOf(selectedText);
-
-                      if (startOffset != -1) {
-                        _selection = TextSelection(
+                ),
+                child: SelectionArea(
+                  onSelectionChanged: (content) {
+                    if (content == null || content.plainText.isEmpty) {
+                      setState(() {
+                        _isTextSelected = false;
+                        _showSelectionToolbar = false;
+                      });
+                      return;
+                    }
+                    final int startOffset =
+                        chapter.content.indexOf(content.plainText);
+                    if (startOffset != -1) {
+                      _selection = TextSelection(
                           baseOffset: startOffset,
-                          extentOffset: startOffset + selectedText.length,
-                        );
-                        setState(() {
-                          _isTextSelected = true;
-                          _showSelectionToolbar = true;
-                        });
-                      }
-                    },
-                    contextMenuBuilder: (context, state) =>
-                        const SizedBox.shrink(),
-                    child: SingleChildScrollView(
-                      controller: _scrollController,
-                      padding: const EdgeInsets.fromLTRB(24, 20, 24, 160),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        // Генерируем массив текстовых параграфов и коробочек-цитат
-                        children: TextTransformer.buildTextBlocks(
+                          extentOffset: startOffset + content.plainText.length);
+                      setState(() {
+                        _isTextSelected = true;
+                        _showSelectionToolbar = true;
+                      });
+                    }
+                  },
+                  contextMenuBuilder: (context, state) =>
+                      const SizedBox.shrink(),
+                  child: SingleChildScrollView(
+                    controller: _scrollController,
+                    padding: const EdgeInsets.fromLTRB(24, 20, 24, 160),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Center(
+                            child: Text(chapter.title,
+                                style: titleStyle,
+                                textAlign: TextAlign.center)),
+                        const SizedBox(height: 24),
+                        ...TextTransformer.buildTextBlocks(
                           chapter.content,
                           _indexedMarks[_currentChapterIndex.floor()] ?? [],
                           _readerSettings,
                           (mark) => _showCommentBottomSheet(mark),
+                          colors,
                         ),
-                      ),
+                      ],
                     ),
                   ),
                 ),
-
-                // Контекстный тулбар управления цитатами
-                AnimatedPositioned(
-                  duration: const Duration(milliseconds: 250),
-                  curve: Curves.fastOutSlowIn,
-                  bottom: _showSelectionToolbar && _isTextSelected ? 0 : -100,
-                  left: 0,
-                  right: 0,
-                  child: SelectionToolbar(
-                    onSaveQuote: () {
-                      _saveQuoteAtSelection();
-                      setState(() {
-                        _showSelectionToolbar = false;
-                        _isTextSelected = false;
-                      });
-                    },
-                    onShare: () {
-                      if (_selection.start != -1 && _selection.end != -1) {
-                        final textToShare = chapter.content
-                            .substring(
-                              _selection.start,
-                              _selection.end,
-                            )
-                            .trim();
-                        _shareQuote(textToShare);
-                      }
-                    },
-                    onClose: () => setState(() {
+              ),
+              AnimatedPositioned(
+                duration: const Duration(milliseconds: 250),
+                bottom: _showSelectionToolbar && _isTextSelected ? 0 : -100,
+                left: 0,
+                right: 0,
+                child: SelectionToolbar(
+                  onSaveQuote: () {
+                    _saveQuoteAtSelection();
+                    setState(() {
                       _showSelectionToolbar = false;
                       _isTextSelected = false;
-                    }),
-                  ),
+                    });
+                  },
+                  onShare: () {
+                    if (_selection.start != -1 && _selection.end != -1) {
+                      _shareQuote(chapter.content
+                          .substring(_selection.start, _selection.end)
+                          .trim());
+                    }
+                  },
+                  onClose: () => setState(() {
+                    _showSelectionToolbar = false;
+                    _isTextSelected = false;
+                  }),
                 ),
-              ],
+              ),
+            ],
+          ),
+        ),
+      );
+    });
+  }
+
+// Метод _buildTextContent переделывается аналогично, просто замени цвета в Material на colors.cardBackground
+
+  Widget _buildTextContent(ChapterEntity chapter) {
+    // Используем расширение темы с фоллбэком на светлую тему
+    final colors = Theme.of(context).extension<AppColors>() ?? AppColors.light;
+
+    return LayoutBuilder(builder: (context, constraints) {
+      return SizedBox(
+        width: constraints.maxWidth,
+        height: constraints.maxHeight,
+        child: Material(
+          color: colors.cardBackground, // Исправлено: теперь динамический цвет
+          child: Theme(
+            data: Theme.of(context).copyWith(
+              textSelectionTheme: TextSelectionThemeData(
+                selectionColor: colors.accent.withOpacity(0.3),
+                selectionHandleColor: colors.accent,
+              ),
+            ),
+            child: SelectionArea(
+              onSelectionChanged: (content) {
+                if (content == null || content.plainText.isEmpty) {
+                  setState(() {
+                    _isTextSelected = false;
+                    _showSelectionToolbar = false;
+                  });
+                  return;
+                }
+                final int startOffset =
+                    chapter.content.indexOf(content.plainText);
+                if (startOffset != -1) {
+                  _selection = TextSelection(
+                      baseOffset: startOffset,
+                      extentOffset: startOffset + content.plainText.length);
+                  setState(() {
+                    _isTextSelected = true;
+                    _showSelectionToolbar = true;
+                  });
+                }
+              },
+              contextMenuBuilder: (context, state) => const SizedBox.shrink(),
+              child: Stack(
+                children: [
+                  SingleChildScrollView(
+                    controller: _scrollController,
+                    padding: const EdgeInsets.fromLTRB(24, 20, 24, 160),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        ...TextTransformer.buildTextBlocks(
+                          chapter.content,
+                          _indexedMarks[_currentChapterIndex.floor()] ?? [],
+                          _readerSettings,
+                          (mark) => _showCommentBottomSheet(mark),
+                          colors, // Передаем объект colors в трансформатор
+                        ),
+                      ],
+                    ),
+                  ),
+                  AnimatedPositioned(
+                    duration: const Duration(milliseconds: 250),
+                    bottom: _showSelectionToolbar && _isTextSelected ? 0 : -100,
+                    left: 0,
+                    right: 0,
+                    child: SelectionToolbar(
+                      onSaveQuote: () {
+                        _saveQuoteAtSelection();
+                        setState(() {
+                          _showSelectionToolbar = false;
+                          _isTextSelected = false;
+                        });
+                      },
+                      onShare: () {
+                        if (_selection.start != -1 && _selection.end != -1) {
+                          _shareQuote(chapter.content
+                              .substring(_selection.start, _selection.end)
+                              .trim());
+                        }
+                      },
+                      onClose: () => setState(() {
+                        _showSelectionToolbar = false;
+                        _isTextSelected = false;
+                      }),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
-        );
-      },
-    );
+        ),
+      );
+    });
   }
 
   int _getVisibleCharOffset() {
@@ -1482,6 +1265,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   }
 
   Future<void> _showEditBookmarkDialog(ReadingPosition bookmark) async {
+    final colors = Theme.of(context).extension<AppColors>()!;
     final titleController = TextEditingController(text: bookmark.title);
     final noteController = TextEditingController(text: bookmark.note);
     int selectedColorValue = bookmark.color ?? 0xFF7B5E57;
@@ -1498,7 +1282,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: const Color(0xFFF8F4F0),
+      backgroundColor: colors.cardBackground,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(25))),
       builder: (ctx) => StatefulBuilder(
@@ -1513,11 +1297,11 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
             mainAxisSize: MainAxisSize.min,
             // Меню минимально по размеру контента
             children: [
-              const Text("Редактирование",
+              Text("Редактирование",
                   style: TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
-                      color: Color(0xFF4E342E))),
+                      color: colors.mainText)),
               const SizedBox(height: 15),
               TextField(
                   controller: titleController,
@@ -1544,8 +1328,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                               color: color,
                               shape: BoxShape.circle,
                               border: selectedColorValue == color.value
-                                  ? Border.all(
-                                      color: const Color(0xFF4E342E), width: 3)
+                                  ? Border.all(color: colors.mainText, width: 3)
                                   : null,
                               boxShadow: const [
                                 BoxShadow(color: Colors.black12, blurRadius: 4)
@@ -1559,8 +1342,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
               const SizedBox(height: 25),
               ElevatedButton(
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF8D6E63),
-                  foregroundColor: Colors.white,
+                  backgroundColor: colors.accent,
+                  foregroundColor: colors.cardBackground,
                   minimumSize: const Size(double.infinity, 50),
                 ),
                 onPressed: () async {
@@ -1573,7 +1356,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                   Navigator.pop(context);
                   await _refreshUI();
                 },
-                child: const Text('Сохранить изменения'),
+                child: Text('Сохранить изменения',
+                    style: TextStyle(color: colors.mainText)),
               ),
             ],
           ),
@@ -1583,6 +1367,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   }
 
   List<Widget> _renderBookmarkMarkers() {
+    final colors = Theme.of(context).extension<AppColors>()!;
     final viewportHeight = _scrollController.hasClients
         ? _scrollController.position.viewportDimension
         : 0.0;
@@ -1604,7 +1389,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
             width: 6,
             height: 24,
             decoration: BoxDecoration(
-              color: Color(bookmark.color ?? 0xFF7B5E57),
+              color: bookmark.color != null
+                  ? Color(bookmark.color!)
+                  : colors.secondaryText,
               borderRadius:
                   const BorderRadius.horizontal(left: Radius.circular(3)),
             ),
@@ -1657,30 +1444,33 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Доступ к системе тем
+    final colors = Theme.of(context).extension<AppColors>()!;
+
     return Scaffold(
-      backgroundColor: const Color(0xFFEDE7D9),
+      backgroundColor: colors.background, // Динамический фон
       appBar: AppBar(
-        backgroundColor: const Color(0xFFBCAAA4),
+        backgroundColor: colors.accent, // Акцентный AppBar
         title: Text(
           widget.book.title,
-          style: const TextStyle(color: Color(0xFF4E342E)),
+          style: TextStyle(color: colors.mainText), // Цвет текста
           overflow: TextOverflow.ellipsis,
         ),
         actions: [
           if (_quotes.isNotEmpty)
             IconButton(
-              icon: const Icon(Icons.format_quote, color: Color(0xFF7B5E57)),
+              icon: Icon(Icons.format_quote, color: colors.mainText),
               onPressed: _showQuotesDialog,
               tooltip: 'Цитаты',
             ),
           if (_bookmarks.isNotEmpty)
             IconButton(
-              icon: const Icon(Icons.bookmarks, color: Color(0xFF7B5E57)),
+              icon: Icon(Icons.bookmarks, color: colors.mainText),
               onPressed: _showBookmarksDialog,
               tooltip: 'Закладки',
             ),
           IconButton(
-            icon: const Icon(Icons.menu_book, color: Color(0xFF7B5E57)),
+            icon: Icon(Icons.menu_book, color: colors.mainText),
             onPressed: _showChaptersDialog,
             tooltip: 'Оглавление',
           ),
@@ -1690,18 +1480,15 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
         behavior: HitTestBehavior.translucent,
         onTap: () {
           if (_showSelectionToolbar) {
-            setState(() {
-              _showSelectionToolbar = false;
-            });
+            setState(() => _showSelectionToolbar = false);
           }
         },
         child: Stack(
           children: [
             AnimatedSwitcher(
               duration: const Duration(milliseconds: 150),
-              transitionBuilder: (Widget child, Animation<double> animation) {
-                return FadeTransition(opacity: animation, child: child);
-              },
+              transitionBuilder: (child, animation) =>
+                  FadeTransition(opacity: animation, child: child),
               child: _buildContent(),
             ),
             ..._renderBookmarkMarkers()
@@ -1709,17 +1496,16 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
         ),
       ),
       bottomNavigationBar: BottomAppBar(
-        color: const Color(0xFFBCAAA4),
-        height: 70, // Фиксированная высота для стабильности
+        color: colors.accent, // Акцентная панель навигации
+        height: 70,
         child: Row(
           children: [
             IconButton(
               onPressed: _currentChapterIndex > 0 ? _previousChapter : null,
-              icon: const Icon(Icons.arrow_back, color: Color(0xFF7B5E57)),
+              icon: Icon(Icons.arrow_back, color: colors.mainText),
             ),
             IconButton(
-              icon: const Icon(Icons.text_fields_outlined,
-                  color: Color(0xFF7B5E57)),
+              icon: Icon(Icons.text_fields_outlined, color: colors.mainText),
               onPressed: _showSettings,
             ),
             Expanded(
@@ -1729,11 +1515,10 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                   mainAxisAlignment: MainAxisAlignment.center,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    if (_currentChapter != null) // Защита от null
+                    if (_currentChapter != null)
                       Text(
                         _currentChapter!.title,
-                        style: const TextStyle(
-                            color: Color(0xFF4E342E), fontSize: 16),
+                        style: TextStyle(color: colors.mainText, fontSize: 16),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         textAlign: TextAlign.center,
@@ -1741,13 +1526,12 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                     const SizedBox(height: 4),
                     ClipRRect(
                       borderRadius: BorderRadius.circular(10),
-                      child: // Внутри BottomAppBar -> Expanded -> Column:
-                          LinearProgressIndicator(
+                      child: LinearProgressIndicator(
                         value: _currentChapterProgress,
-                        // Теперь это процент внутри текущей главы
-                        backgroundColor: const Color(0xFFD7CCC8),
-                        valueColor:
-                            const AlwaysStoppedAnimation(Color(0xFF7B5E57)),
+                        backgroundColor: colors.border,
+                        // Цвет фона индикатора
+                        valueColor: AlwaysStoppedAnimation(colors.mainText),
+                        // Цвет прогресса
                         minHeight: 6,
                       ),
                     ),
@@ -1757,14 +1541,13 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
             ),
             IconButton(
               onPressed: _showAddBookmarkDialog,
-              icon: const Icon(Icons.bookmark_add_outlined,
-                  color: Color(0xFF7B5E57)),
+              icon: Icon(Icons.bookmark_add_outlined, color: colors.mainText),
             ),
             IconButton(
               onPressed: _currentChapterIndex < _chapters.length - 1
                   ? _nextChapter
                   : null,
-              icon: const Icon(Icons.arrow_forward, color: Color(0xFF7B5E57)),
+              icon: Icon(Icons.arrow_forward, color: colors.mainText),
             ),
           ],
         ),
@@ -1775,14 +1558,16 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   Future<void> _showAddBookmarkDialog() async {
     final titleController = TextEditingController();
     final noteController = TextEditingController();
+    final colors = Theme.of(context).extension<AppColors>()!;
 
-    // Эстетичная палитра (цвета в стиле твоего приложения)
+    // Палитра теперь может быть слегка скорректирована под яркость темы,
+    // если захочешь, но здесь используем те же пастельные тона
     final List<Color> palette = [
-      const Color(0xFFEF9A9A), // Мягкий пыльно-розовый
-      const Color(0xFFFFF59D), // Нежный кремово-желтый
-      const Color(0xFFA5D6A7), // Светлый мятный
-      const Color(0xFF90CAF9), // Приглушенный небесно-голубой
-      const Color(0xFFCE93D8), // Легкий лавандовый
+      const Color(0xFFEF9A9A),
+      const Color(0xFFFFF59D),
+      const Color(0xFFA5D6A7),
+      const Color(0xFF90CAF9),
+      const Color(0xFFCE93D8),
     ];
 
     int selectedColorValue = palette[0].value;
@@ -1790,7 +1575,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: const Color(0xFFF8F4F0),
+      backgroundColor: colors.background,
+      // Используем динамический фон
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(25)),
       ),
@@ -1805,25 +1591,42 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Text("Новая закладка",
+                Text("Новая закладка",
                     style: TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
-                        color: Color(0xFF4E342E))),
+                        color: colors.mainText)),
                 const SizedBox(height: 15),
                 TextField(
                   controller: titleController,
-                  decoration: const InputDecoration(
-                      labelText: 'Название', border: OutlineInputBorder()),
+                  style: TextStyle(color: colors.mainText),
+                  decoration: InputDecoration(
+                    labelText: 'Название',
+                    labelStyle: TextStyle(color: colors.secondaryText),
+                    border: OutlineInputBorder(
+                        borderSide: BorderSide(color: colors.border)),
+                    enabledBorder: OutlineInputBorder(
+                        borderSide: BorderSide(color: colors.border)),
+                    focusedBorder: OutlineInputBorder(
+                        borderSide: BorderSide(color: colors.accent)),
+                  ),
                 ),
                 const SizedBox(height: 10),
                 TextField(
                   controller: noteController,
-                  decoration: const InputDecoration(
-                      labelText: 'Описание', border: OutlineInputBorder()),
+                  style: TextStyle(color: colors.mainText),
+                  decoration: InputDecoration(
+                    labelText: 'Описание',
+                    labelStyle: TextStyle(color: colors.secondaryText),
+                    border: OutlineInputBorder(
+                        borderSide: BorderSide(color: colors.border)),
+                    enabledBorder: OutlineInputBorder(
+                        borderSide: BorderSide(color: colors.border)),
+                    focusedBorder: OutlineInputBorder(
+                        borderSide: BorderSide(color: colors.accent)),
+                  ),
                 ),
                 const SizedBox(height: 20),
-                // Эстетичная палитра
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: palette
@@ -1838,8 +1641,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                                 shape: BoxShape.circle,
                                 border: selectedColorValue == color.value
                                     ? Border.all(
-                                        color: const Color(0xFF4E342E),
-                                        width: 3)
+                                        color: colors.mainText, width: 3)
                                     : null,
                                 boxShadow: const [
                                   BoxShadow(
@@ -1853,12 +1655,11 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                 const SizedBox(height: 25),
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF8D6E63),
+                    backgroundColor: colors.accent,
                     foregroundColor: Colors.white,
                     minimumSize: const Size(double.infinity, 50),
                   ),
                   onPressed: () async {
-                    // ЛОГИКА СОХРАНЕНИЯ
                     final newBookmark = ReadingPosition(
                       chapterIndex: _currentChapterIndex,
                       position: _getCurrentScrollPercent(),
@@ -1879,9 +1680,10 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                     );
 
                     Navigator.pop(context);
-                    await _refreshUI(); // Обновление маркеров на экране
+                    await _refreshUI();
                   },
-                  child: const Text('Сохранить'),
+                  child: const Text('Сохранить',
+                      style: TextStyle(fontWeight: FontWeight.bold)),
                 ),
               ],
             ),
