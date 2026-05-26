@@ -1932,7 +1932,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
         await DatabaseHelper.instance.getQuotesWithPosition(widget.book.id);
 
     final Map<int, List<ReadingPosition>> newMap = {};
-    for (var mark in [...bookmarks, ...quotes]) {
+    for (var mark in [...quotes]) {
       newMap.putIfAbsent(mark.chapterIndex.floor(), () => []).add(mark);
     }
 
