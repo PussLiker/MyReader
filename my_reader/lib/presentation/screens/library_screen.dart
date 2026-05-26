@@ -338,8 +338,13 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
                 child: Text('Удалить', style: TextStyle(color: Colors.red))),
           ],
         ),
-        onTap: () => Navigator.push(context,
-            MaterialPageRoute(builder: (_) => ReaderScreen(book: book))),
+        onTap: () async {
+          await Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => ReaderScreen(book: book)),
+          );
+          _refreshData(); // Обновляем список книг
+        },
       ),
     );
   }

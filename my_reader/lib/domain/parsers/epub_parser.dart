@@ -1,3 +1,4 @@
+// lib/data/parsers/epub_parser.dart
 import 'dart:io';
 import 'package:epubx/epubx.dart' as epub;
 import 'package:my_reader/domain/entities/chapter_entity.dart';
@@ -73,7 +74,7 @@ class EpubParser {
   }
 
   String _extractTextFromHtml(String html) {
-    // Упрощенная очистка HTML для получения читаемого текста
+    // Очистка HTML для получения читаемого текста
     String text = html
         .replaceAll(RegExp(r'<script[^>]*>.*?</script>', caseSensitive: false), '')
         .replaceAll(RegExp(r'<style[^>]*>.*?</style>', caseSensitive: false), '')
@@ -81,21 +82,29 @@ class EpubParser {
         .replaceAll(RegExp(r'<head>.*?</head>', caseSensitive: false), '')
         .replaceAll(RegExp(r'<meta[^>]*>', caseSensitive: false), '')
         .replaceAll(RegExp(r'<title>.*?</title>', caseSensitive: false), '')
-        .replaceAll(RegExp(r'<[^>]*>'), ' ') // Удаляем все оставшиеся теги
+        // Заменяем теги абзацев на переносы строк
+        .replaceAll(RegExp(r'</p>', caseSensitive: false), '\n\n')
+        .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), '\n')
+        .replaceAll(RegExp(r'<div[^>]*>', caseSensitive: false), '')
+        .replaceAll(RegExp(r'</div>', caseSensitive: false), '\n')
+        // Удаляем все остальные теги
+        .replaceAll(RegExp(r'<[^>]*>'), ' ')
+        // Заменяем HTML сущности
         .replaceAll(RegExp(r'&nbsp;'), ' ')
         .replaceAll(RegExp(r'&amp;'), '&')
         .replaceAll(RegExp(r'&lt;'), '<')
         .replaceAll(RegExp(r'&gt;'), '>')
         .replaceAll(RegExp(r'&quot;'), '"')
-        .replaceAll(RegExp(r'\s+'), ' ')
+        .replaceAll(RegExp(r'&apos;'), "'")
+        // Убираем множественные пробелы, но сохраняем переносы строк
+        .replaceAllMapped(RegExp(r'[ \t]+'), (match) => ' ')
         .trim();
 
-    // Убираем слишком длинные пробелы и форматируем текст
-    text = text
-        .replaceAll(RegExp(r'\.\s+'), '.\n\n')
-        .replaceAll(RegExp(r'\?\s+'), '?\n\n')
-        .replaceAll(RegExp(r'!\s+'), '!\n\n')
-        .replaceAll(RegExp(r'\n\s*\n'), '\n\n');
+    // Убираем лишние переносы строк (больше 2 подряд)
+    text = text.replaceAll(RegExp(r'\n{3,}'), '\n\n');
+
+    // Убираем пробелы перед переносами строк
+    text = text.replaceAll(RegExp(r'[ \t]+\n'), '\n');
 
     return text;
   }
@@ -111,7 +120,7 @@ class EpubParser {
           if (content.isNotEmpty) {
             buffer.writeln('=== ${chapter.Title ?? "Без названия"} ===');
             buffer.writeln(content);
-            buffer.writeln('\n\n');
+            buffer.writeln('\n');
           }
         }
       }
@@ -123,7 +132,7 @@ class EpubParser {
         if (htmlFile.Content != null && htmlFile.Content!.isNotEmpty) {
           final content = _extractTextFromHtml(htmlFile.Content!);
           buffer.writeln(content);
-          buffer.writeln('\n\n');
+          buffer.writeln('\n');
         }
       }
     }

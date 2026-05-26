@@ -103,6 +103,7 @@ class DatabaseHelper {
     await db.insert('formats', {'name': 'EPUB'});
     await db.insert('formats', {'name': 'FB2'});
     await db.insert('formats', {'name': 'TXT'});
+    await db.insert('formats', {'name': 'PDF'});
   }
 
   // --- Методы для Авторов ---

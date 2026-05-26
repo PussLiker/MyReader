@@ -86,6 +86,38 @@ class BookRepository {
     return await databaseHelper.insertBook(book);
   }
 
+  // В book_repository.dart:
+
+  // В book_repository.dart:
+
+  Future<int> addPdfBook(
+    String filePath, {
+    String? categoryOverride,
+    String? titleOverride,
+    String? authorOverride,
+    required String pdfMode,
+  }) async {
+    final format = 'pdf';
+    String title = titleOverride ?? path.basenameWithoutExtension(filePath);
+    String author = authorOverride ?? 'Unknown';
+    String category = categoryOverride ??
+        (pdfMode == 'fiction' ? 'PDF Fiction' : 'PDF Non-fiction');
+
+    final book = BookEntity(
+      id: 0,
+      title: title,
+      author: author,
+      path: filePath,
+      format: format.toUpperCase(),
+      coverPath: null,
+      progress: 0,
+      position: 0.0,
+      category: category,
+    );
+
+    return await databaseHelper.insertBook(book);
+  }
+
   Future<void> updateBook(BookEntity book) async {
     await databaseHelper.updateBook(book);
   }

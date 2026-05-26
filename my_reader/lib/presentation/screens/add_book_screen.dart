@@ -1,3 +1,4 @@
+// lib/presentation/screens/add_book_screen.dart
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
@@ -10,7 +11,7 @@ import 'package:my_reader/domain/use_cases/add_book.dart';
 import 'package:my_reader/presentation/providers/book_provider.dart';
 
 import '../../app_colors.dart';
-import '../widgets/ThemeToggleButton.dart'; // ДОБАВЛЕНО
+import '../widgets/ThemeToggleButton.dart';
 
 class AddBookScreen extends ConsumerStatefulWidget {
   final BookEntity? book;
@@ -31,6 +32,8 @@ class _AddBookScreenState extends ConsumerState<AddBookScreen>
   String? _fileFormat;
   String? _errorMessage;
   bool _isEditMode = false;
+  bool _isPdfFile = false;
+
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
   late Animation<Offset> _slideAnimation;
@@ -45,6 +48,7 @@ class _AddBookScreenState extends ConsumerState<AddBookScreen>
       _categoryController.text = widget.book!.category ?? '';
       _filePath = widget.book!.path;
       _fileFormat = widget.book!.format;
+      _isPdfFile = widget.book!.format.toUpperCase() == 'PDF';
     }
 
     _animationController = AnimationController(
@@ -70,9 +74,10 @@ class _AddBookScreenState extends ConsumerState<AddBookScreen>
     if (result != null && result.files.single.path != null) {
       final selectedPath = result.files.single.path!;
       final extension = path.extension(selectedPath).toLowerCase();
-      if (!['.epub', '.fb2', '.txt'].contains(extension)) {
+
+      if (!['.epub', '.fb2', '.txt', '.pdf'].contains(extension)) {
         setState(() {
-          _errorMessage = 'Поддерживаются только EPUB, FB2, TXT файлы';
+          _errorMessage = 'Поддерживаются только EPUB, FB2, TXT, PDF файлы';
         });
         return;
       }
@@ -81,7 +86,22 @@ class _AddBookScreenState extends ConsumerState<AddBookScreen>
         _filePath = selectedPath;
         _fileFormat = extension.substring(1);
         _errorMessage = null;
+        _isPdfFile = extension == '.pdf';
       });
+
+      // Для PDF устанавливаем значения по умолчанию
+      if (_isPdfFile) {
+        if (_titleController.text.isEmpty) {
+          _titleController.text = path.basenameWithoutExtension(_filePath!);
+        }
+        if (_authorController.text.isEmpty) {
+          _authorController.text = 'Неизвестный автор';
+        }
+        if (_categoryController.text.isEmpty) {
+          _categoryController.text = 'PDF';
+        }
+        return;
+      }
 
       try {
         final file = File(_filePath!);
@@ -92,7 +112,7 @@ class _AddBookScreenState extends ConsumerState<AddBookScreen>
                 epub.Title ?? path.basenameWithoutExtension(_filePath!);
           }
           if (_authorController.text.isEmpty) {
-            _authorController.text = epub.Author ?? 'Unknown';
+            _authorController.text = epub.Author ?? 'Неизвестный автор';
           }
           if (_categoryController.text.isEmpty) {
             final subjects = epub.Schema?.Package?.Metadata?.Subjects;
@@ -116,8 +136,9 @@ class _AddBookScreenState extends ConsumerState<AddBookScreen>
               final lastName =
                   author?.findElements('last-name').firstOrNull?.text ?? '';
               _authorController.text = '$firstName $lastName'.trim();
-              if (_authorController.text.isEmpty)
-                _authorController.text = 'Unknown';
+              if (_authorController.text.isEmpty) {
+                _authorController.text = 'Неизвестный автор';
+              }
             }
             if (_categoryController.text.isEmpty) {
               _categoryController.text =
@@ -128,6 +149,9 @@ class _AddBookScreenState extends ConsumerState<AddBookScreen>
         } else if (_fileFormat == 'txt') {
           if (_titleController.text.isEmpty) {
             _titleController.text = path.basenameWithoutExtension(_filePath!);
+          }
+          if (_authorController.text.isEmpty) {
+            _authorController.text = 'Неизвестный автор';
           }
           if (_categoryController.text.isEmpty) {
             _categoryController.text = 'Text';
@@ -183,23 +207,17 @@ class _AddBookScreenState extends ConsumerState<AddBookScreen>
           title: _titleController.text.trim(),
           author: _authorController.text.trim(),
           category: _categoryController.text.trim().isEmpty
-              ? 'Fiction'
+              ? (_isPdfFile ? 'PDF' : 'Fiction')
               : _categoryController.text.trim(),
         );
       }
 
-      // Инвалидируем ВСЕ провайдеры книг
       ref.invalidate(getBooksProvider(null));
       ref.invalidate(getAllBooksProvider);
-
-      // Обновляем категории
       ref.invalidate(getCategoriesProvider);
-
-      // ДОБАВЛЕНО: Очищаем пустые категории из БД
       await repo.cleanupOrphanedCategories();
 
       if (mounted) {
-        // Возвращаем true, а не просто закрываем
         Navigator.pop(context, true);
       }
     } catch (e) {
@@ -208,13 +226,6 @@ class _AddBookScreenState extends ConsumerState<AddBookScreen>
         _errorMessage = 'Ошибка сохранения: $e';
       });
     }
-  }
-
-  String? _requiredValidator(String? value) {
-    if (value == null || value.trim().isEmpty) {
-      return 'Это поле обязательно для заполнения';
-    }
-    return null;
   }
 
   @override
@@ -254,21 +265,23 @@ class _AddBookScreenState extends ConsumerState<AddBookScreen>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Поля ввода используем как пример для остальных
                 _buildTextFormField(
-                    controller: _titleController,
-                    label: 'Название *',
-                    colors: colors),
+                  controller: _titleController,
+                  label: 'Название *',
+                  colors: colors,
+                ),
                 const SizedBox(height: 16),
                 _buildTextFormField(
-                    controller: _authorController,
-                    label: 'Автор *',
-                    colors: colors),
+                  controller: _authorController,
+                  label: 'Автор *',
+                  colors: colors,
+                ),
                 const SizedBox(height: 16),
                 _buildTextFormField(
-                    controller: _categoryController,
-                    label: 'Категория *',
-                    colors: colors),
+                  controller: _categoryController,
+                  label: 'Категория',
+                  colors: colors,
+                ),
                 const SizedBox(height: 16),
 
                 if (!_isEditMode)
@@ -278,7 +291,6 @@ class _AddBookScreenState extends ConsumerState<AddBookScreen>
                     label: const Text('Выбрать файл'),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: colors.border,
-                      // или colors.cardBackground
                       foregroundColor: colors.mainText,
                       minimumSize: const Size(double.infinity, 48),
                     ),
@@ -299,9 +311,44 @@ class _AddBookScreenState extends ConsumerState<AddBookScreen>
                       ),
                     ],
                   ),
+                  // Предупреждение только для PDF
+                  if (_isPdfFile && !_isEditMode) ...[
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: colors.secondaryText.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                            color: colors.secondaryText.withOpacity(0.3)),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.info_outline,
+                              color: colors.secondaryText, size: 20),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              'PDF — особый формат. Цитаты и настройки текста недоступны. Работает просмотр страниц, зум, закладки.',
+                              style: TextStyle(
+                                color: colors.secondaryText,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ],
-
-                const SizedBox(height: 16),
+                if (_errorMessage != null) ...[
+                  const SizedBox(height: 16),
+                  Text(
+                    _errorMessage!,
+                    style: const TextStyle(color: Colors.red, fontSize: 14),
+                  ),
+                ],
+                const SizedBox(height: 24),
                 ElevatedButton.icon(
                   onPressed: _saveBook,
                   icon: const Icon(Icons.save, color: Colors.white),
@@ -322,7 +369,6 @@ class _AddBookScreenState extends ConsumerState<AddBookScreen>
     );
   }
 
-// Удобный метод, чтобы не дублировать код полей
   Widget _buildTextFormField({
     required TextEditingController controller,
     required String label,
@@ -339,7 +385,12 @@ class _AddBookScreenState extends ConsumerState<AddBookScreen>
             OutlineInputBorder(borderSide: BorderSide(color: colors.mainText)),
       ),
       style: TextStyle(color: colors.mainText),
-      validator: (value) => value?.isEmpty == true ? 'Обязательное поле' : null,
+      validator: (value) {
+        if (label.contains('*') && (value == null || value.trim().isEmpty)) {
+          return 'Обязательное поле';
+        }
+        return null;
+      },
     );
   }
 }

@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'package:flutter/rendering.dart';
+import 'package:pdfrx/pdfrx.dart';
 
 import '../../app_colors.dart';
 import '../../domain/entities/Selection.dart';
 import '../../domain/entities/reader_settings.dart';
+import '../../domain/parsers/pdf_parser.dart';
 import '../../domain/use_cases/settings_service.dart';
 import '../providers/book_provider.dart';
 import '../widgets/highlight_painter.dart';
@@ -52,7 +54,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   List<Highlight> highlights = [];
   bool _hasActiveSelection = false;
   Key _textKey = UniqueKey();
+  bool _isLoadingPage = false;
   final GlobalKey _richTextKey = GlobalKey();
+  PageController? _pdfPageController;
 
   double _getCurrentScrollPercent() {
     if (_scrollController.hasClients) {
@@ -66,24 +70,46 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   void _savePosition() {
     _savePositionTimer?.cancel();
     _savePositionTimer = Timer(const Duration(seconds: 1), () async {
-      if (!_scrollController.hasClients) return;
-
-      final maxScroll = _scrollController.position.maxScrollExtent;
-      final currentScroll = _scrollController.offset;
-
-      // Вычисляем процент
-      final double percent = maxScroll > 0 ? (currentScroll / maxScroll) : 0.0;
-
-      try {
-        await DatabaseHelper.instance.updatePosition(
+      if (_isPdfBook) {
+        if (_pdfPageController != null && _pdfPageController!.hasClients) {
+          final pageIndex = _pdfPageController!.page?.round() ?? 0;
+          print('Saving PDF position: page $pageIndex'); // Отладка
+          await DatabaseHelper.instance.updatePosition(
             widget.book.id,
-            _currentChapterIndex.toInt(), // Глава -> progress
-            percent // Процент -> position
-            );
-      } catch (e) {
-        print('Ошибка сохранения в БД: $e');
+            pageIndex,
+            0.0,
+          );
+        }
+      } else {
+        if (!_scrollController.hasClients) return;
+
+        final maxScroll = _scrollController.position.maxScrollExtent;
+        final currentScroll = _scrollController.offset;
+        final double percent =
+            maxScroll > 0 ? (currentScroll / maxScroll) : 0.0;
+
+        await DatabaseHelper.instance.updatePosition(
+          widget.book.id,
+          _currentChapterIndex.toInt(),
+          percent,
+        );
       }
     });
+  }
+
+  // Немедленное сохранение (для стрелочек)
+  Future<void> _immediateSavePosition() async {
+    if (_isPdfBook) {
+      if (_pdfPageController != null && _pdfPageController!.hasClients) {
+        final pageIndex = _pdfPageController!.page?.round() ?? 0;
+        print('Immediate saving PDF position: page $pageIndex');
+        await DatabaseHelper.instance.updatePosition(
+          widget.book.id,
+          pageIndex,
+          0.0,
+        );
+      }
+    }
   }
 
   void _restoreScrollPosition(double percent, {int retryCount = 0}) async {
@@ -202,8 +228,21 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
         case 'TXT':
           chapters = await TxtParser().parseChapters(widget.book.path);
           break;
+        case 'PDF':
+          final parser = PdfParser();
+          chapters = await parser.parseChapters(widget.book.path);
+
+          // Восстанавливаем сохранённую позицию
+          if (updatedBook != null && updatedBook.progress > 0) {
+            _currentChapterIndex =
+                updatedBook.progress.toDouble().clamp(0, chapters.length - 1);
+          } else if (widget.book.progress > 0) {
+            _currentChapterIndex =
+                widget.book.progress.toDouble().clamp(0, chapters.length - 1);
+          }
+          break;
         default:
-          throw Exception('Неподдерживаемый формат');
+          throw Exception('Неподдерживаемый формат: ${widget.book.format}');
       }
 
       if (chapters.isEmpty) throw Exception('Книга пуста');
@@ -292,24 +331,66 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     setState(() {
       _currentChapterIndex =
           chapterIndex.clamp(0.0, (_chapters.length - 1).toDouble());
-      _isLoading = false; // На случай если вызвали во время загрузки
+      _isLoading = false;
     });
 
-    // Ждем, пока Flutter отрисует новую главу, и скроллим к проценту
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _restoreScrollPosition(percent);
     });
   }
 
   void _nextChapter() {
-    if (_currentChapterIndex < _chapters.length - 1) {
-      _goToPosition(_currentChapterIndex + 1.0);
+    if (_isPdfBook) {
+      if (_pdfPageController != null && _pdfPageController!.hasClients) {
+        final currentPage = _pdfPageController!.page?.round() ?? 0;
+        if (currentPage < _chapters.length - 1) {
+          _pdfPageController!
+              .nextPage(
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeInOut,
+          )
+              .then((_) {
+            _immediateSavePosition();
+            _updateCurrentChapterIndex();
+          });
+        }
+      }
+    } else {
+      if (_currentChapterIndex < _chapters.length - 1) {
+        _goToPosition(_currentChapterIndex + 1.0);
+      }
     }
   }
 
   void _previousChapter() {
-    if (_currentChapterIndex > 0) {
-      _goToPosition(_currentChapterIndex - 1.0);
+    if (_isPdfBook) {
+      if (_pdfPageController != null && _pdfPageController!.hasClients) {
+        final currentPage = _pdfPageController!.page?.round() ?? 0;
+        if (currentPage > 0) {
+          _pdfPageController!
+              .previousPage(
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeInOut,
+          )
+              .then((_) {
+            _immediateSavePosition();
+            _updateCurrentChapterIndex();
+          });
+        }
+      }
+    } else {
+      if (_currentChapterIndex > 0) {
+        _goToPosition(_currentChapterIndex - 1.0);
+      }
+    }
+  }
+
+  void _updateCurrentChapterIndex() {
+    if (_pdfPageController != null && _pdfPageController!.hasClients) {
+      final page = _pdfPageController!.page?.round() ?? 0;
+      setState(() {
+        _currentChapterIndex = page.toDouble();
+      });
     }
   }
 
@@ -553,23 +634,36 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   }
 
   void _goToBookmark(ReadingPosition mark) async {
-    // 1. Сначала переключаем главу
-    setState(() {
-      _currentChapterIndex = mark.chapterIndex;
-    });
+    if (_isPdfBook) {
+      // Для PDF переходим на нужную страницу
+      if (_pdfPageController != null && _pdfPageController!.hasClients) {
+        final targetPage =
+            mark.chapterIndex.toInt().clamp(0, _chapters.length - 1);
+        await _pdfPageController!.animateToPage(
+          targetPage,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeInOut,
+        );
+        setState(() {
+          _currentChapterIndex = targetPage.toDouble();
+        });
+      }
+    } else {
+      // Для обычных книг
+      setState(() {
+        _currentChapterIndex = mark.chapterIndex;
+      });
 
-    // 2. КРИТИЧНО: Ждем, пока Flutter отрисует новую главу (300мс обычно хватает)
-    await Future.delayed(const Duration(milliseconds: 300));
+      await Future.delayed(const Duration(milliseconds: 300));
 
-    // 3. Теперь скроллим к проценту
-    if (_scrollController.hasClients) {
-      final maxScroll = _scrollController.position.maxScrollExtent;
-
-      _scrollController.animateTo(
-        maxScroll * mark.position,
-        duration: const Duration(milliseconds: 600),
-        curve: Curves.easeInOutCubic,
-      );
+      if (_scrollController.hasClients) {
+        final maxScroll = _scrollController.position.maxScrollExtent;
+        _scrollController.animateTo(
+          maxScroll * mark.position,
+          duration: const Duration(milliseconds: 600),
+          curve: Curves.easeInOutCubic,
+        );
+      }
     }
   }
 
@@ -1029,6 +1123,12 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     );
   }
 
+  // В reader_screen.dart, добавь в класс _ReaderScreenState:
+
+  bool get _isPdfBook {
+    return widget.book.format.toUpperCase() == 'PDF';
+  }
+
   Widget _buildEpubContent(ChapterEntity chapter) {
     final colors = Theme.of(context).extension<AppColors>() ?? AppColors.light;
 
@@ -1401,14 +1501,81 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     }).toList();
   }
 
+  /// Отображение PDF (всегда как картинки)
+  Widget _buildPdfContent() {
+    final colors = Theme.of(context).extension<AppColors>()!;
+
+    return Container(
+      color: colors.background,
+      child: PdfDocumentViewBuilder.file(
+        widget.book.path,
+        builder: (context, document) {
+          if (document == null) {
+            return const Center(child: CircularProgressIndicator());
+          }
+
+          // Загружаем сохранённую позицию
+          final savedPage = widget.book.progress;
+          print('Opening PDF at saved page: $savedPage');
+
+          if (_pdfPageController == null || !_pdfPageController!.hasClients) {
+            _pdfPageController = PageController(
+              initialPage: savedPage.clamp(0, document.pages.length - 1),
+            );
+
+            // Синхронизируем _currentChapterIndex
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) {
+                setState(() {
+                  _currentChapterIndex = savedPage.toDouble();
+                });
+              }
+            });
+          }
+
+          return PageView.builder(
+            controller: _pdfPageController,
+            itemCount: document.pages.length,
+            onPageChanged: (index) {
+              print('Page changed to: $index');
+              setState(() {
+                _currentChapterIndex = index.toDouble();
+              });
+              _savePosition(); // Сохраняем при свайпе
+            },
+            itemBuilder: (context, index) {
+              return SizedBox.expand(
+                child: InteractiveViewer(
+                  minScale: 0.8,
+                  maxScale: 3.0,
+                  child: PdfPageView(
+                    document: document,
+                    pageNumber: index + 1,
+                    alignment: Alignment.center,
+                  ),
+                ),
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+
   Widget _buildContent() {
     if (_isLoading) return _buildLoading();
     if (_errorMessage.isNotEmpty) return _buildError();
     if (_chapters.isEmpty) return _buildNoContent();
 
+    // Для PDF используем специальный виджет
+    if (_isPdfBook) {
+      return _buildPdfContent();
+    }
+
     final chapter = _currentChapter;
     if (chapter == null) return _buildError();
 
+    // EPUB, FB2, TXT
     if (widget.book.format == 'EPUB') {
       return _buildEpubContent(chapter);
     } else {
@@ -1416,31 +1583,6 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     }
   }
 
-  void _showSettings() {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) => SettingsPanel(
-        settings: _readerSettings,
-        onSettingsChanged: (newSettings) async {
-          final double currentPercent = _currentChapterProgress;
-
-          setState(() {
-            _readerSettings = newSettings;
-          });
-
-          // ДОБАВЛЕНО: Сохраняем глобальные настройки
-          final settingsService = SettingsService();
-          await settingsService.saveSettings(newSettings);
-
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            _restoreScrollPosition(currentPercent);
-          });
-        },
-      ),
-    );
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -1496,29 +1638,47 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
         ),
       ),
       bottomNavigationBar: BottomAppBar(
-        color: colors.accent, // Акцентная панель навигации
+        color: colors.accent,
         height: 70,
         child: Row(
           children: [
+            // Кнопка назад
             IconButton(
-              onPressed: _currentChapterIndex > 0 ? _previousChapter : null,
+              onPressed: _isPdfBook
+                  ? (_pdfPageController != null &&
+                          _pdfPageController!.hasClients &&
+                          (_pdfPageController!.page?.round() ?? 0) > 0
+                      ? _previousChapter
+                      : null)
+                  : (_currentChapterIndex > 0 ? _previousChapter : null),
               icon: Icon(Icons.arrow_back, color: colors.mainText),
             ),
+
             IconButton(
               icon: Icon(Icons.text_fields_outlined, color: colors.mainText),
               onPressed: _showSettings,
             ),
+
+            // Индикатор прогресса / информация
             Expanded(
               child: InkWell(
-                onTap: _showChaptersDialog,
+                onTap: _isPdfBook ? null : _showChaptersDialog,
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    if (_currentChapter != null)
+                    if (_isPdfBook)
+                      Text(
+                        'Страница ${(_pdfPageController?.page?.round() ?? 0) + 1} / ${_chapters.length}',
+                        style: TextStyle(color: colors.mainText, fontSize: 14),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
+                      )
+                    else if (_currentChapter != null)
                       Text(
                         _currentChapter!.title,
-                        style: TextStyle(color: colors.mainText, fontSize: 16),
+                        style: TextStyle(color: colors.mainText, fontSize: 14),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         textAlign: TextAlign.center,
@@ -1527,11 +1687,12 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                     ClipRRect(
                       borderRadius: BorderRadius.circular(10),
                       child: LinearProgressIndicator(
-                        value: _currentChapterProgress,
+                        value: _isPdfBook && _chapters.isNotEmpty
+                            ? ((_pdfPageController?.page?.round() ?? 0) + 1) /
+                                _chapters.length
+                            : _currentChapterProgress,
                         backgroundColor: colors.border,
-                        // Цвет фона индикатора
                         valueColor: AlwaysStoppedAnimation(colors.mainText),
-                        // Цвет прогресса
                         minHeight: 6,
                       ),
                     ),
@@ -1539,18 +1700,68 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                 ),
               ),
             ),
+
+            // Кнопка закладки
             IconButton(
               onPressed: _showAddBookmarkDialog,
               icon: Icon(Icons.bookmark_add_outlined, color: colors.mainText),
             ),
+
+            // Кнопка вперед
             IconButton(
-              onPressed: _currentChapterIndex < _chapters.length - 1
-                  ? _nextChapter
-                  : null,
+              onPressed: _isPdfBook
+                  ? (_pdfPageController != null &&
+                          _pdfPageController!.hasClients &&
+                          (_pdfPageController!.page?.round() ?? 0) <
+                              _chapters.length - 1
+                      ? _nextChapter
+                      : null)
+                  : (_currentChapterIndex < _chapters.length - 1
+                      ? _nextChapter
+                      : null),
               icon: Icon(Icons.arrow_forward, color: colors.mainText),
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  void _showSettings() {
+    if (_isPdfBook) {
+      // Показываем сообщение, что настройки недоступны
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Настройки текста недоступны для PDF-файлов'),
+          backgroundColor:
+              Theme.of(context).extension<AppColors>()?.secondaryText,
+          duration: const Duration(seconds: 2),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => SettingsPanel(
+        settings: _readerSettings,
+        onSettingsChanged: (newSettings) async {
+          final double currentPercent = _currentChapterProgress;
+
+          setState(() {
+            _readerSettings = newSettings;
+          });
+
+          final settingsService = SettingsService();
+          await settingsService.saveSettings(newSettings);
+
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _restoreScrollPosition(currentPercent);
+          });
+        },
       ),
     );
   }
@@ -1660,10 +1871,19 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                     minimumSize: const Size(double.infinity, 50),
                   ),
                   onPressed: () async {
+                    final int currentPage;
+                    if (_isPdfBook) {
+                      currentPage = _pdfPageController?.page?.round() ?? 0;
+                    } else {
+                      currentPage = _currentChapterIndex.toInt();
+                    }
+
                     final newBookmark = ReadingPosition(
-                      chapterIndex: _currentChapterIndex,
-                      position: _getCurrentScrollPercent(),
-                      charOffset: _getVisibleCharOffset(),
+                      chapterIndex: _isPdfBook
+                          ? (_pdfPageController?.page?.round() ?? 0).toDouble()
+                          : _currentChapterIndex,
+                      position: _isPdfBook ? 0.0 : _getCurrentScrollPercent(),
+                      charOffset: _isPdfBook ? 0 : _getVisibleCharOffset(),
                       title: titleController.text.isEmpty
                           ? "Закладка"
                           : titleController.text,
@@ -1706,9 +1926,6 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   }
 
   Future<void> _refreshUI() async {
-    final double currentScroll =
-        _scrollController.hasClients ? _scrollController.offset : 0.0;
-
     final bookmarks =
         await DatabaseHelper.instance.getBookmarksWithPosition(widget.book.id);
     final quotes =
@@ -1727,8 +1944,20 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
 
     // Восстанавливаем позицию
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
-        _scrollController.jumpTo(currentScroll);
+      if (_isPdfBook) {
+        // Для PDF восстанавливаем страницу
+        if (_pdfPageController != null && _pdfPageController!.hasClients) {
+          final savedPage = widget.book.progress;
+          if (savedPage > 0 && savedPage < _chapters.length) {
+            _pdfPageController!.jumpToPage(savedPage);
+            _currentChapterIndex = savedPage.toDouble();
+          }
+        }
+      } else {
+        // Для текстовых книг
+        if (_scrollController.hasClients) {
+          // Твой код восстановления скролла, если нужен
+        }
       }
     });
   }
